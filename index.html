@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tasks</title>
+<link rel="stylesheet" href="css/style.css?v=10">
+</head>
+<body>
+<div id="app">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-top">
+      <button class="quick-add-btn" id="btnQuickAdd" title="Новая задача (N)">
+        <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 1v14M1 8h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        Новая задача
+      </button>
+    </div>
+
+    <div class="notif-banner" id="notifBanner" hidden>
+      <button class="notif-banner-close" id="btnDismissNotif" title="Скрыть">✕</button>
+      <span id="notifBannerText">🔔 Включить уведомления о напоминаниях?</span>
+      <button id="btnEnableNotif">Включить</button>
+    </div>
+
+    <div class="search-box" id="searchBox" title="Открыть быстрый переход (⌘K)">
+      <svg viewBox="0 0 16 16" width="13" height="13"><path d="M11 11l4 4M7 12A5 5 0 107 2a5 5 0 000 10z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      <input type="text" id="searchInput" placeholder="Поиск">
+      <span class="search-kbd">⌘K</span>
+    </div>
+
+    <nav class="nav-lists" id="navLists">
+      <!-- built-in lists injected by JS -->
+    </nav>
+
+    <div class="sidebar-divider"></div>
+
+    <div class="areas-tree" id="areasTree">
+      <!-- areas/projects injected by JS -->
+    </div>
+
+    <div class="sidebar-bottom">
+      <button class="sidebar-add-btn" id="btnAddArea">+ Область</button>
+      <button class="sidebar-add-btn" id="btnAddProject">+ Проект</button>
+    </div>
+    <div class="sidebar-bottom sidebar-bottom-secondary">
+      <button class="sidebar-add-btn" id="btnExport" title="Скачать резервную копию всех данных">⬇ Экспорт</button>
+      <button class="sidebar-add-btn" id="btnImport" title="Загрузить данные из файла резервной копии">⬆ Импорт</button>
+      <input type="file" id="importFile" accept="application/json" hidden>
+    </div>
+  </aside>
+
+  <!-- Main list -->
+  <main class="main-panel">
+    <header class="main-header">
+      <div class="main-header-title">
+        <span class="main-icon" id="mainIcon"></span>
+        <h1 id="mainTitle">Сегодня</h1>
+      </div>
+      <div class="main-header-sub" id="mainSubtitle"></div>
+    </header>
+
+    <div class="task-list" id="taskList">
+      <!-- task groups injected by JS -->
+    </div>
+
+    <button class="fab" id="btnFab" title="Новая задача">
+      <svg viewBox="0 0 20 20" width="20" height="20"><path d="M10 2v16M2 10h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+    </button>
+  </main>
+
+  <!-- Detail panel -->
+  <aside class="detail-panel" id="detailPanel">
+    <div class="detail-empty" id="detailEmpty">
+      <p>Выберите задачу</p>
+    </div>
+  </aside>
+
+</div>
+
+<!-- Quick Add Modal -->
+<div class="modal-overlay" id="quickAddOverlay">
+  <div class="modal quick-add-modal">
+    <input type="text" id="quickAddTitle" placeholder="Название задачи" autocomplete="off">
+    <input type="text" id="quickAddNotes" placeholder="Заметки" autocomplete="off">
+    <input type="date" id="quickAddWhenDate" class="quick-add-date-input" hidden>
+    <div class="quick-add-row">
+      <select id="quickAddWhen">
+        <option value="">Не запланировано</option>
+        <option value="today">Сегодня</option>
+        <option value="evening">Этим вечером</option>
+        <option value="date">Дата…</option>
+        <option value="someday">Когда-нибудь</option>
+      </select>
+      <select id="quickAddProject">
+        <option value="">Входящие</option>
+      </select>
+      <button id="quickAddSubmit">Добавить</button>
+    </div>
+  </div>
+</div>
+
+<!-- Command Palette -->
+<div class="modal-overlay" id="paletteOverlay">
+  <div class="modal palette-modal">
+    <input type="text" id="paletteInput" placeholder="Перейти к списку, проекту, тегу, задаче…" autocomplete="off">
+    <div class="palette-results" id="paletteResults"></div>
+  </div>
+</div>
+
+<!-- Task context menu -->
+<div class="context-menu" id="taskContextMenu" hidden></div>
+
+<!-- Toast / undo -->
+<div class="toast" id="toast" hidden>
+  <span id="toastMsg"></span>
+  <button id="toastUndo">Отменить</button>
+</div>
+
+<script type="module" src="js/app.js?v=10"></script>
+</body>
+</html>
