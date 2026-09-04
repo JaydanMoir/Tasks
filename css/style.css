@@ -752,8 +752,9 @@ select.detail-select, input.detail-date {
 /* ---------------- Toast ---------------- */
 .toast {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: 14px;
@@ -766,7 +767,7 @@ select.detail-select, input.detail-date {
   z-index: 300;
   animation: toast-in 0.18s ease;
 }
-@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes toast-in { from { opacity: 0; transform: translateX(-50%) translateY(8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
 .toast button {
   background: rgba(255,255,255,0.14);
   color: #fff;
