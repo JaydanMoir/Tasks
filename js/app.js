@@ -1123,11 +1123,11 @@ function showToast(message, onUndo) {
     $('#toastMsg').textContent = 'Восстановлено';
     $('#toastUndo').style.display = 'none';
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(hideToast, 1800);
+    toastTimer = setTimeout(hideToast, 3000);
   });
   toast.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(hideToast, 5000);
+  toastTimer = setTimeout(hideToast, 15000);
 }
 function hideToast() {
   $('#toast').hidden = true;

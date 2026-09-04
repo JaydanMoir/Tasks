@@ -750,6 +750,7 @@ select.detail-select, input.detail-date {
 .ctx-sep { height: 1px; background: var(--border); margin: 5px 4px; }
 
 /* ---------------- Toast ---------------- */
+.toast[hidden] { display: none; }
 .toast {
   position: fixed;
   left: 50%;
