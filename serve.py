@@ -12,6 +12,7 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     port = 8765
-    server = http.server.ThreadingHTTPServer(('0.0.0.0', port), NoCacheHandler)
+    # слушаем только петлевой интерфейс: на 0.0.0.0 приложение было видно всей локальной сети
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', port), NoCacheHandler)
     print(f'Serving on http://localhost:{port} (no-cache)')
     server.serve_forever()

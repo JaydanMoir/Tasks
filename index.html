@@ -4,10 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Tasks</title>
-<link rel="stylesheet" href="css/style.css?v=10">
+<link rel="stylesheet" href="css/style.css?v=11">
 </head>
 <body>
 <div id="app">
+
+  <!-- Затемнение под выдвижным меню (только на узких экранах) -->
+  <div class="sidebar-scrim" id="sidebarScrim"></div>
 
   <!-- Sidebar -->
   <aside class="sidebar">
@@ -24,10 +27,10 @@
       <button id="btnEnableNotif">Включить</button>
     </div>
 
-    <div class="search-box" id="searchBox" title="Открыть быстрый переход (⌘K)">
+    <div class="search-box" id="searchBox" title="Поиск по задачам и заметкам">
       <svg viewBox="0 0 16 16" width="13" height="13"><path d="M11 11l4 4M7 12A5 5 0 107 2a5 5 0 000 10z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
       <input type="text" id="searchInput" placeholder="Поиск">
-      <span class="search-kbd">⌘K</span>
+      <span class="search-kbd" title="Быстрый переход (Ctrl/⌘ + K)" role="button" tabindex="0">⌘K</span>
     </div>
 
     <nav class="nav-lists" id="navLists">
@@ -55,6 +58,9 @@
   <main class="main-panel">
     <header class="main-header">
       <div class="main-header-title">
+        <button class="menu-btn" id="btnMenu" title="Списки и проекты" aria-label="Открыть меню">
+          <svg viewBox="0 0 18 18" width="17" height="17"><path d="M2 4.5h14M2 9h14M2 13.5h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
         <span class="main-icon" id="mainIcon"></span>
         <h1 id="mainTitle">Сегодня</h1>
       </div>
@@ -84,7 +90,7 @@
   <div class="modal quick-add-modal">
     <input type="text" id="quickAddTitle" placeholder="Название задачи" autocomplete="off">
     <input type="text" id="quickAddNotes" placeholder="Заметки" autocomplete="off">
-    <input type="date" id="quickAddWhenDate" class="quick-add-date-input" hidden>
+    <button type="button" id="quickAddWhenDate" class="date-field empty" data-value="" hidden>📅 Выбрать дату</button>
     <div class="quick-add-row">
       <select id="quickAddWhen">
         <option value="">Не запланировано</option>
@@ -118,6 +124,6 @@
   <button id="toastUndo">Отменить</button>
 </div>
 
-<script type="module" src="js/app.js?v=10"></script>
+<script type="module" src="js/app.js?v=11"></script>
 </body>
 </html>

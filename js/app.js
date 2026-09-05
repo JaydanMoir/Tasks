@@ -1,4 +1,5 @@
-import { store, todayStr, addDays, formatDate } from './store.js?v=10';
+import { store, todayStr, addDays, formatDate, isDateStr } from './store.js?v=11';
+import { openDatePicker, openTimePicker, closePicker, isPickerOpen } from './wheelpicker.js?v=11';
 
 // ---------------- UI state (not persisted) ----------------
 let currentView = { type: 'today' };
@@ -36,7 +37,21 @@ function fmtDate(dateStr) {
 }
 
 function isOverdue(dateStr) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(dateStr) && dateStr < todayStr();
+  return isDateStr(dateStr) && dateStr < todayStr();
+}
+
+// Переименование проекта/области идёт через contentEditable на <h1>, а не через <input>.
+// Без этой проверки Backspace во время переименования отправлял выбранную задачу в корзину.
+function isTypingTarget(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable === true;
+}
+
+// На телефоне сайдбар — выдвижная панель поверх списка, после выбора её надо убрать.
+// На широких экранах класса просто нет, вызов безвреден.
+function closeMobileSidebar() {
+  $('#app').classList.remove('sidebar-open');
 }
 
 // ---------------- Sidebar ----------------
@@ -48,7 +63,7 @@ function renderSidebar() {
     upcoming: store.upcomingTasks().length,
     anytime: store.anytimeTasks().length,
     someday: store.somedayTasks().length,
-    logbook: store.logbookTasks().length,
+    logbook: 0, // архив выполненного растёт бесконечно — счётчик здесь только шумит
     trash: store.trashTasks().length,
   };
   nav.innerHTML = Object.keys(LIST_META).map(key => {
@@ -68,6 +83,7 @@ function renderSidebar() {
       selectedTaskId = null;
       searchQuery = '';
       $('#searchInput').value = '';
+      closeMobileSidebar();
       renderAll();
     });
   });
@@ -136,6 +152,7 @@ function renderSidebar() {
     el.addEventListener('click', () => {
       currentView = { type: 'area', id: el.dataset.area };
       selectedTaskId = null;
+      closeMobileSidebar();
       renderAll();
     });
   });
@@ -143,6 +160,7 @@ function renderSidebar() {
     el.addEventListener('click', () => {
       currentView = { type: 'project', id: el.dataset.project };
       selectedTaskId = null;
+      closeMobileSidebar();
       renderAll();
     });
   });
@@ -252,7 +270,9 @@ function bindProjectHeadingEvents() {
     el.addEventListener('drop', (e) => {
       e.preventDefault();
       el.classList.remove('drag-over');
-      if (dragTaskId) store.updateTask(dragTaskId, { headingId: el.dataset.headingDrop });
+      const h = store.state.headings[el.dataset.headingDrop];
+      // переносим вместе с проектом — раздел чужого проекта иначе «проглатывал» задачу
+      if (dragTaskId && h) store.updateTask(dragTaskId, { projectId: h.projectId, headingId: h.id });
       dragTaskId = null;
     });
   });
@@ -332,7 +352,10 @@ function renderMain() {
     else {
       let lastDate = null;
       tasks.forEach(t => {
-        const d = new Date(t.completedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+        // completedAt может отсутствовать у старых/импортированных записей — не показываем «Invalid Date»
+        const d = t.completedAt
+          ? new Date(t.completedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
+          : 'Без даты';
         if (d !== lastDate) { html += groupHtml(d); lastDate = d; }
         html += taskRowHtml(t, { showProject: true });
       });
@@ -451,11 +474,19 @@ function renderOrganizedList(tasks) {
     else if (t.areaId) (byAreaDirect[t.areaId] ||= []).push(t);
   });
 
+  // отмечаем всё, что уже попало в разметку, чтобы ничего не потерялось между ветками
+  const rendered = new Set(unfiled.map(t => t.id));
+
   let html = '';
   if (unfiled.length) {
     html += groupHtml('Без проекта');
     html += unfiled.map(t => taskRowHtml(t)).join('');
   }
+
+  const renderProjectGroup = (p, headingHtmlStr) => {
+    html += headingHtmlStr;
+    html += byProject[p.id].map(t => { rendered.add(t.id); return taskRowHtml(t); }).join('');
+  };
 
   const areas = Object.values(store.state.areas).sort((a, b) => a.createdAt - b.createdAt);
   areas.forEach(area => {
@@ -463,19 +494,23 @@ function renderOrganizedList(tasks) {
     const direct = byAreaDirect[area.id] || [];
     if (!projects.length && !direct.length) return;
     html += `<div class="project-heading-row"><span class="area-dot"></span>${esc(area.title)}</div>`;
-    projects.forEach(p => {
-      html += `<div class="group-heading" style="margin-left:8px">${esc(p.title)}</div>`;
-      html += byProject[p.id].map(t => taskRowHtml(t)).join('');
-    });
-    if (direct.length) html += direct.map(t => taskRowHtml(t)).join('');
+    projects.forEach(p => renderProjectGroup(p, `<div class="group-heading" style="margin-left:8px">${esc(p.title)}</div>`));
+    if (direct.length) html += direct.map(t => { rendered.add(t.id); return taskRowHtml(t); }).join('');
   });
 
   Object.keys(byProject).forEach(pid => {
     const p = store.state.projects[pid];
-    if (!p || p.areaId) return;
-    html += `<div class="project-heading-row"><span class="tree-icon" style="color:var(--text-secondary)">◆</span>${esc(p.title)}</div>`;
-    html += byProject[pid].map(t => taskRowHtml(t)).join('');
+    if (!p || p.areaId || byProject[pid].every(t => rendered.has(t.id))) return;
+    renderProjectGroup(p, `<div class="project-heading-row"><span class="tree-icon" style="color:var(--text-secondary)">◆</span>${esc(p.title)}</div>`);
   });
+
+  // подстраховка: задачи проектов, не попавших ни в одну ветку выше (например,
+  // проект в удалённой/неактивной области), раньше молча исчезали из списка
+  const leftover = tasks.filter(t => !rendered.has(t.id));
+  if (leftover.length) {
+    html += groupHtml('Прочее');
+    html += leftover.map(t => taskRowHtml(t, { showProject: true })).join('');
+  }
 
   if (!html) html = `<div class="empty-state">Пусто</div>`;
   return html;
@@ -586,7 +621,7 @@ function bindCalendarEvents() {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
       selectedTaskId = el.dataset.calTask;
-      renderDetail();
+      renderAll(); // renderDetail() в одиночку не обновлял подсветку выбранной задачи
     });
   });
 }
@@ -643,6 +678,33 @@ function bindTaskListEvents() {
 }
 
 // ---------------- Detail panel ----------------
+// Кнопка-поле вместо <input type="date"> и пары <select>: на телефоне нативные
+// контролы мелкие и выглядят по-разному в каждом браузере, а барабан — привычный жест.
+function dateFieldHtml(id, value, placeholder, icon = '📅') {
+  const label = value
+    ? (isDateStr(value) ? fmtDate(value) : value)
+    : placeholder;
+  return `<button type="button" class="date-field ${value ? '' : 'empty'}" id="${id}" data-value="${esc(value || '')}">
+    <span>${icon} ${esc(label)}</span>
+    ${value ? `<span class="date-field-clear" data-clear="${id}" title="Очистить">✕</span>` : ''}
+  </button>`;
+}
+
+// Общая обвязка поля-кнопки: открытие барабана и крестик «очистить».
+function bindDateField(sel, { kind = 'date', title, allowClear = false, clearLabel, onPick }) {
+  const el = $(sel);
+  if (!el) return;
+  el.addEventListener('click', (e) => {
+    if (e.target.closest('[data-clear]')) {   // крестик не должен открывать барабан
+      e.stopPropagation();
+      onPick(null);
+      return;
+    }
+    const open = kind === 'time' ? openTimePicker : openDatePicker;
+    open({ value: el.dataset.value || null, title, allowClear, clearLabel, onPick });
+  });
+}
+
 function syncRowTitle(taskId, title) {
   $$(`.task-row[data-id="${taskId}"] .task-title`).forEach(el => { el.textContent = title; });
 }
@@ -652,7 +714,8 @@ function renderDetail() {
   const task = selectedTaskId ? store.state.tasks[selectedTaskId] : null;
   $('#app').classList.toggle('detail-open', !!task);
   if (!task) {
-    panel.innerHTML = '';
+    // раньше панель просто очищалась и заглушка из index.html пропадала навсегда
+    panel.innerHTML = `<div class="detail-empty" id="detailEmpty"><p>Выберите задачу</p></div>`;
     return;
   }
 
@@ -664,13 +727,8 @@ function renderDetail() {
     .sort((a, b) => a.createdAt - b.createdAt)
     .map(a => `<option value="${a.id}" ${task.areaId === a.id && !task.projectId ? 'selected' : ''}>${esc(a.title)}</option>`).join('');
 
-  const whenValue = task.when && /^\d{4}-\d{2}-\d{2}$/.test(task.when) ? 'date' : (task.when || '');
+  const whenValue = isDateStr(task.when) ? 'date' : (task.when || '');
   const taskHeadings = task.projectId ? store.projectHeadings(task.projectId) : [];
-  const [reminderH, reminderM] = (task.reminderTime || '').split(':');
-  const reminderHours = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0'));
-  const reminderMinuteSet = new Set([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]);
-  if (reminderM !== undefined) reminderMinuteSet.add(Number(reminderM));
-  const reminderMinutes = Array.from(reminderMinuteSet).sort((a, b) => a - b).map(m => String(m).padStart(2, '0'));
 
   panel.innerHTML = `
     <div class="detail-panel-header">
@@ -688,20 +746,12 @@ function renderDetail() {
         <option value="date" ${whenValue === 'date' ? 'selected' : ''}>Дата…</option>
         <option value="someday" ${whenValue === 'someday' ? 'selected' : ''}>Когда-нибудь</option>
       </select>
-      <input type="date" class="detail-date" id="detWhenDate" style="margin-top:6px; ${whenValue === 'date' ? '' : 'display:none'}" value="${whenValue === 'date' ? task.when : ''}">
+      <div id="detWhenDateWrap" style="margin-top:6px; ${whenValue === 'date' ? '' : 'display:none'}">
+        ${dateFieldHtml('detWhenDate', whenValue === 'date' ? task.when : null, 'Выбрать дату')}
+      </div>
       <div id="detReminderWrap" style="margin-top:6px;">
         <div class="detail-label" style="margin-top:8px;">Напоминание</div>
-        <div class="reminder-time-picker">
-          <select class="detail-select" id="detReminderHour">
-            <option value="">—</option>
-            ${reminderHours.map(h => `<option value="${h}" ${reminderH === h ? 'selected' : ''}>${h}</option>`).join('')}
-          </select>
-          <span class="reminder-time-sep">:</span>
-          <select class="detail-select" id="detReminderMinute">
-            <option value="">—</option>
-            ${reminderMinutes.map(m => `<option value="${m}" ${reminderM === m ? 'selected' : ''}>${m}</option>`).join('')}
-          </select>
-        </div>
+        ${dateFieldHtml('detReminderTime', task.reminderTime, 'Без напоминания', '⏰')}
         <select class="detail-select" id="detReminderRepeat" style="margin-top:6px; ${task.reminderTime ? '' : 'display:none'}">
           <option value="" ${!task.reminderRepeatMinutes ? 'selected' : ''}>Не повторять</option>
           <option value="15" ${task.reminderRepeatMinutes === 15 ? 'selected' : ''}>Каждые 15 минут</option>
@@ -715,7 +765,7 @@ function renderDetail() {
 
     <div class="detail-section">
       <div class="detail-label">Дедлайн</div>
-      <input type="date" class="detail-date" id="detDeadline" value="${task.deadline || ''}">
+      ${dateFieldHtml('detDeadline', task.deadline, 'Без дедлайна', '🏁')}
     </div>
 
     <div class="detail-section">
@@ -800,53 +850,55 @@ function renderDetail() {
   autoGrow($('#detTitle'));
   $('#detTitle').addEventListener('input', (e) => {
     task.title = e.target.value;
-    localStorage.setItem('tasksApp.v1', JSON.stringify(store.state));
+    store.saveQuiet();
     syncRowTitle(task.id, e.target.value);
     autoGrow(e.target);
   });
-  $('#detTitle').addEventListener('blur', () => store.save());
+  $('#detTitle').addEventListener('blur', commitInlineEdit);
   $('#detNotes').addEventListener('input', (e) => {
     task.notes = e.target.value;
-    localStorage.setItem('tasksApp.v1', JSON.stringify(store.state));
+    store.saveQuiet();
   });
-  $('#detNotes').addEventListener('blur', () => store.save());
+  $('#detNotes').addEventListener('blur', commitInlineEdit);
 
   $('#detWhen').addEventListener('change', (e) => {
     const v = e.target.value;
     if (v === 'date') {
-      $('#detWhenDate').style.display = '';
-      const d = $('#detWhenDate').value || todayStr();
-      store.updateTask(task.id, { when: d, notifiedOn: null });
+      // сначала фиксируем дату, потом открываем барабан: если его закрыть по «Отмена»,
+      // состояние всё равно остаётся согласованным с выбранным пунктом списка
+      const start = isDateStr(task.when) ? task.when : todayStr();
+      store.updateTask(task.id, { when: start, notifiedOn: null });
+      openDatePicker({
+        value: start,
+        title: 'Когда',
+        onPick: (d) => d && store.updateTask(task.id, { when: d, notifiedOn: null }),
+      });
     } else {
-      $('#detWhenDate').style.display = 'none';
+      $('#detWhenDateWrap').style.display = 'none';
       store.updateTask(task.id, { when: v || null, notifiedOn: null });
     }
   });
-  $('#detWhenDate').addEventListener('change', (e) => {
-    store.updateTask(task.id, { when: e.target.value, notifiedOn: null });
+  bindDateField('#detWhenDate', {
+    title: 'Когда',
+    onPick: (d) => store.updateTask(task.id, { when: d || todayStr(), notifiedOn: null }),
   });
-  function commitReminderTime() {
-    const h = $('#detReminderHour').value;
-    const m = $('#detReminderMinute').value;
-    const repeatWrap = $('#detReminderRepeat');
-    if (h && m) {
-      if (repeatWrap) repeatWrap.style.display = '';
-      store.updateTask(task.id, { reminderTime: `${h}:${m}`, notifiedOn: null, lastNotifiedAt: null });
-    } else {
-      if (repeatWrap) repeatWrap.style.display = 'none';
-      store.updateTask(task.id, { reminderTime: null, reminderRepeatMinutes: null, notifiedOn: null, lastNotifiedAt: null });
-    }
-  }
-  const reminderHourInput = $('#detReminderHour');
-  const reminderMinuteInput = $('#detReminderMinute');
-  if (reminderHourInput) reminderHourInput.addEventListener('change', commitReminderTime);
-  if (reminderMinuteInput) reminderMinuteInput.addEventListener('change', commitReminderTime);
+  bindDateField('#detDeadline', {
+    title: 'Дедлайн',
+    allowClear: true,
+    clearLabel: 'Убрать дедлайн',
+    onPick: (d) => store.updateTask(task.id, { deadline: d }),
+  });
+  bindDateField('#detReminderTime', {
+    kind: 'time',
+    title: 'Напоминание',
+    allowClear: true,
+    onPick: (t) => store.updateTask(task.id, t
+      ? { reminderTime: t, notifiedOn: null, lastNotifiedAt: null }
+      : { reminderTime: null, reminderRepeatMinutes: null, notifiedOn: null, lastNotifiedAt: null }),
+  });
   const reminderRepeatInput = $('#detReminderRepeat');
   if (reminderRepeatInput) reminderRepeatInput.addEventListener('change', (e) => {
     store.updateTask(task.id, { reminderRepeatMinutes: e.target.value ? Number(e.target.value) : null });
-  });
-  $('#detDeadline').addEventListener('change', (e) => {
-    store.updateTask(task.id, { deadline: e.target.value || null });
   });
   $('#detRepeat').addEventListener('change', (e) => {
     const wrap = $('#detRepeatFromCompletionWrap');
@@ -894,7 +946,7 @@ function renderDetail() {
   });
   panel.querySelectorAll('[data-cl-text]').forEach(el => {
     el.addEventListener('input', (e) => store.updateChecklistItem(task.id, el.dataset.clText, e.target.value));
-    el.addEventListener('blur', () => store.save());
+    el.addEventListener('blur', commitInlineEdit);
   });
 
   panel.querySelectorAll('[data-tag-toggle]').forEach(el => {
@@ -933,6 +985,15 @@ function autoGrow(el) {
   el.style.height = el.scrollHeight + 'px';
 }
 
+// Текст полей панели уже записан посимвольно через saveQuiet(). Полный store.save()
+// здесь вызвал бы emit() → renderDetail(), а тот перестраивает innerHTML панели и
+// выбрасывает фокус при переходе между полями. Поэтому обновляем только сайдбар и список.
+function commitInlineEdit() {
+  store.saveQuiet();
+  renderSidebar();
+  renderMain();
+}
+
 // ---------------- Quick Add ----------------
 function populateQuickAddProjects() {
   const sel = $('#quickAddProject');
@@ -946,12 +1007,14 @@ function populateQuickAddProjects() {
 
 function openQuickAdd() {
   closePalette();
+  closePicker();
+  closeMobileSidebar();
   populateQuickAddProjects();
   $('#quickAddTitle').value = '';
   $('#quickAddNotes').value = '';
   $('#quickAddWhen').value = currentView.type === 'today' ? 'today' : (currentView.type === 'someday' ? 'someday' : '');
+  setQuickAddDate(null);
   $('#quickAddWhenDate').hidden = true;
-  $('#quickAddWhenDate').value = '';
   if (currentView.type === 'project') $('#quickAddProject').value = currentView.id;
   $('#quickAddOverlay').classList.add('open');
   setTimeout(() => $('#quickAddTitle').focus(), 30);
@@ -959,12 +1022,19 @@ function openQuickAdd() {
 function closeQuickAdd() {
   $('#quickAddOverlay').classList.remove('open');
 }
+// Поле даты в быстром добавлении: значение живёт в data-value, подпись — человекочитаемая
+function setQuickAddDate(value) {
+  const el = $('#quickAddWhenDate');
+  el.dataset.value = value || '';
+  el.classList.toggle('empty', !value);
+  el.textContent = value ? `📅 ${fmtDate(value)}` : '📅 Выбрать дату';
+}
 function submitQuickAdd() {
   const title = $('#quickAddTitle').value.trim();
   if (!title) { closeQuickAdd(); return; }
   const notes = $('#quickAddNotes').value.trim();
   const whenSel = $('#quickAddWhen').value;
-  const when = whenSel === 'date' ? ($('#quickAddWhenDate').value || todayStr()) : (whenSel || null);
+  const when = whenSel === 'date' ? ($('#quickAddWhenDate').dataset.value || todayStr()) : (whenSel || null);
   const projectId = $('#quickAddProject').value || null;
   let areaId = null;
   if (projectId) {
@@ -984,7 +1054,7 @@ function pickViewForTask(t) {
   if (t.inInbox) return { type: 'inbox' };
   if (t.when === 'today' || t.when === 'evening') return { type: 'today' };
   if (t.when === 'someday') return { type: 'someday' };
-  if (t.when && /^\d{4}-\d{2}-\d{2}$/.test(t.when)) return { type: 'upcoming' };
+  if (isDateStr(t.when)) return { type: 'upcoming' };
   return { type: 'anytime' };
 }
 
@@ -1044,6 +1114,7 @@ function runPaletteItem(idx) {
   if (!it) return;
   it.action();
   closePalette();
+  closeMobileSidebar();
   renderAll();
 }
 
@@ -1055,6 +1126,7 @@ function paletteSetActive(idx) {
 
 function openPalette() {
   closeQuickAdd();
+  closePicker();
   $('#paletteInput').value = '';
   renderPalette();
   $('#paletteOverlay').classList.add('open');
@@ -1065,7 +1137,9 @@ function closePalette() {
 }
 
 // ---------------- Notifications ----------------
-let notifBannerDismissed = false;
+// закрытие баннера запоминаем — иначе он возвращается при каждой перезагрузке
+const NOTIF_DISMISS_KEY = 'tasksApp.notifBannerDismissed';
+let notifBannerDismissed = localStorage.getItem(NOTIF_DISMISS_KEY) === '1';
 function updateNotifBanner() {
   const banner = $('#notifBanner');
   if (!banner) return;
@@ -1148,11 +1222,13 @@ function openContextMenu(taskId, x, y) {
   const items = [];
   items.push({ icon: task.status === 'completed' ? '↺' : '✓', label: task.status === 'completed' ? 'Вернуть в активные' : 'Выполнить', action: () => store.toggleComplete(taskId) });
   items.push({ sep: true });
-  items.push({ icon: '☀', label: 'Сегодня', action: () => store.updateTask(taskId, { when: 'today' }) });
-  items.push({ icon: '📆', label: 'Завтра', action: () => store.updateTask(taskId, { when: addDays(todayStr(), 1) }) });
-  items.push({ icon: '🌙', label: 'Этим вечером', action: () => store.updateTask(taskId, { when: 'evening' }) });
-  items.push({ icon: '🌒', label: 'Когда-нибудь', action: () => store.updateTask(taskId, { when: 'someday' }) });
-  items.push({ icon: '≡', label: 'Без даты', action: () => store.updateTask(taskId, { when: null }) });
+  // notifiedOn сбрасываем вместе с датой, иначе перенесённая задача не напомнит о себе заново
+  const setWhen = when => store.updateTask(taskId, { when, notifiedOn: null, lastNotifiedAt: null });
+  items.push({ icon: '☀', label: 'Сегодня', action: () => setWhen('today') });
+  items.push({ icon: '📆', label: 'Завтра', action: () => setWhen(addDays(todayStr(), 1)) });
+  items.push({ icon: '🌙', label: 'Этим вечером', action: () => setWhen('evening') });
+  items.push({ icon: '🌒', label: 'Когда-нибудь', action: () => setWhen('someday') });
+  items.push({ icon: '≡', label: 'Без даты', action: () => setWhen(null) });
   items.push({ sep: true });
   items.push({ icon: '⧉', label: 'Дублировать', action: () => { const c = store.duplicateTask(taskId); if (c) { selectedTaskId = c.id; renderAll(); } } });
   items.push({ icon: '🗑', label: 'Удалить в корзину', danger: true, action: () => {
@@ -1174,12 +1250,15 @@ function openContextMenu(taskId, x, y) {
     });
   });
 
+  // измеряем скрытым, иначе меню на кадр вспыхивает на прошлой позиции
+  menu.style.visibility = 'hidden';
   menu.hidden = false;
   const rect = menu.getBoundingClientRect();
   const maxX = window.innerWidth - rect.width - 8;
   const maxY = window.innerHeight - rect.height - 8;
-  menu.style.left = Math.min(x, maxX) + 'px';
-  menu.style.top = Math.min(y, maxY) + 'px';
+  menu.style.left = Math.max(8, Math.min(x, maxX)) + 'px';
+  menu.style.top = Math.max(8, Math.min(y, maxY)) + 'px';
+  menu.style.visibility = '';
 }
 
 // ---------------- Global render ----------------
@@ -1189,11 +1268,7 @@ function renderAll() {
   renderDetail();
 }
 
-store.subscribe(() => {
-  renderSidebar();
-  renderMain();
-  renderDetail();
-});
+store.subscribe(renderAll);
 
 // ---------------- Event wiring ----------------
 function seedIfEmpty() {
@@ -1233,22 +1308,38 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnDismissNotif = $('#btnDismissNotif');
   if (btnDismissNotif) btnDismissNotif.addEventListener('click', () => {
     notifBannerDismissed = true;
+    try { localStorage.setItem(NOTIF_DISMISS_KEY, '1'); } catch (_) { /* не критично */ }
     updateNotifBanner();
   });
   setTimeout(fireReminderNotifications, 2000);
   setInterval(fireReminderNotifications, 20000);
 
+  $('#btnMenu').addEventListener('click', () => $('#app').classList.toggle('sidebar-open'));
+  $('#sidebarScrim').addEventListener('click', closeMobileSidebar);
+
   $('#btnQuickAdd').addEventListener('click', openQuickAdd);
   $('#btnFab').addEventListener('click', openQuickAdd);
   $('#quickAddSubmit').addEventListener('click', submitQuickAdd);
   $('#quickAddWhen').addEventListener('change', (e) => {
-    $('#quickAddWhenDate').hidden = e.target.value !== 'date';
-    if (e.target.value === 'date' && !$('#quickAddWhenDate').value) $('#quickAddWhenDate').value = todayStr();
+    const isDate = e.target.value === 'date';
+    $('#quickAddWhenDate').hidden = !isDate;
+    if (!isDate) return;
+    if (!$('#quickAddWhenDate').dataset.value) setQuickAddDate(todayStr());
+    openDatePicker({ value: $('#quickAddWhenDate').dataset.value, title: 'Когда', onPick: (d) => d && setQuickAddDate(d) });
+  });
+  $('#quickAddWhenDate').addEventListener('click', () => {
+    openDatePicker({
+      value: $('#quickAddWhenDate').dataset.value || todayStr(),
+      title: 'Когда',
+      onPick: (d) => d && setQuickAddDate(d),
+    });
   });
   $('#quickAddOverlay').addEventListener('click', (e) => { if (e.target.id === 'quickAddOverlay') closeQuickAdd(); });
-  $('#quickAddTitle').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submitQuickAdd();
-    if (e.key === 'Escape') closeQuickAdd();
+  // Escape/Enter на всём окне: глобальный обработчик сюда не доходит, а раньше
+  // обработчик висел только на поле названия — из «Заметок» окно было не закрыть
+  $('#quickAddOverlay').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeQuickAdd(); }
+    else if (e.key === 'Enter' && e.target.tagName !== 'SELECT') { e.preventDefault(); submitQuickAdd(); }
   });
 
   $('#btnAddArea').addEventListener('click', () => {
@@ -1261,6 +1352,7 @@ document.addEventListener('DOMContentLoaded', () => {
       let areaId = currentView.type === 'area' ? currentView.id : null;
       const p = store.createProject({ title: title.trim(), areaId });
       currentView = { type: 'project', id: p.id };
+      closeMobileSidebar();
       renderAll();
     }
   });
@@ -1303,6 +1395,12 @@ document.addEventListener('DOMContentLoaded', () => {
     searchQuery = e.target.value;
     renderMain();
   });
+  // значок ⌘K обещал быстрый переход, но кликом ничего не открывалось
+  $('.search-kbd').addEventListener('click', (e) => { e.stopPropagation(); openPalette(); });
+
+  window.addEventListener('tasks:save-error', () => {
+    showToast('Не удалось сохранить: хранилище браузера переполнено');
+  });
 
   $('#paletteOverlay').addEventListener('click', (e) => { if (e.target.id === 'paletteOverlay') closePalette(); });
   $('#paletteInput').addEventListener('input', renderPalette);
@@ -1322,8 +1420,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('resize', closeContextMenu);
 
   document.addEventListener('keydown', (e) => {
-    const tag = document.activeElement.tagName;
-    const typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    const typing = isTypingTarget(document.activeElement);
     if (!$('#taskContextMenu').hidden && e.key === 'Escape') { closeContextMenu(); return; }
 
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -1331,23 +1428,28 @@ document.addEventListener('DOMContentLoaded', () => {
       if ($('#paletteOverlay').classList.contains('open')) closePalette(); else openPalette();
       return;
     }
+    if (isPickerOpen()) return; // барабан обрабатывает клавиши сам
     if ($('#paletteOverlay').classList.contains('open')) return;
     if ($('#quickAddOverlay').classList.contains('open')) return;
 
-    if (!typing && e.key.toLowerCase() === 'n') { e.preventDefault(); openQuickAdd(); }
+    const mod = e.metaKey || e.ctrlKey; // Ctrl на Windows/Linux, Cmd на macOS
+
+    if (!typing && !mod && e.key.toLowerCase() === 'n') { e.preventDefault(); openQuickAdd(); }
+    if (e.key === 'Escape' && $('#app').classList.contains('sidebar-open')) { closeMobileSidebar(); return; }
     if (!typing && e.key === 'Escape' && selectedTaskId) { selectedTaskId = null; renderAll(); }
-    if (!typing && (e.key === 'Delete' || e.key === 'Backspace') && selectedTaskId) {
+    if (!typing && !mod && (e.key === 'Delete' || e.key === 'Backspace') && selectedTaskId) {
       e.preventDefault();
       const id = selectedTaskId;
       store.trashTask(id);
       selectedTaskId = null;
       showToast('Задача удалена', () => store.restoreTask(id));
     }
-    if (e.metaKey && !typing && e.key.toLowerCase() === 't' && selectedTaskId) {
+    // Ctrl+T перехватывает браузер, поэтому дублируем голой «t»
+    if (!typing && e.key.toLowerCase() === 't' && selectedTaskId && !e.shiftKey && !e.altKey) {
       e.preventDefault();
       store.updateTask(selectedTaskId, { when: 'today', notifiedOn: null });
     }
-    if (e.metaKey && !typing && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && selectedTaskId) {
+    if (mod && !typing && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && selectedTaskId) {
       const ids = $$('#taskList .task-row').map(el => el.dataset.id);
       const idx = ids.indexOf(selectedTaskId);
       if (idx !== -1) {
@@ -1356,7 +1458,7 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (e.key === 'ArrowDown' && idx < ids.length - 1) store.reorderTask(selectedTaskId, ids[idx + 2] || null);
       }
     }
-    if (e.metaKey && !typing && e.key === '/') {
+    if (mod && !typing && e.key === '/') {
       e.preventDefault();
       $('#app').classList.toggle('sidebar-collapsed');
     }

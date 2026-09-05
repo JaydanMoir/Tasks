@@ -23,6 +23,15 @@ function addDays(dateStr, days) {
   return formatDate(dt);
 }
 
+function daysBetween(fromStr, toStr) {
+  const [y1, m1, d1] = fromStr.split('-').map(Number);
+  const [y2, m2, d2] = toStr.split('-').map(Number);
+  // округление гасит сдвиг на час при переходе на летнее время
+  return Math.round((new Date(y2, m2 - 1, d2) - new Date(y1, m1 - 1, d1)) / 86400000);
+}
+
+const isDateStr = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+
 function nextRepeatDate(dateStr, repeat) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
@@ -47,6 +56,9 @@ class Store {
   constructor() {
     this.state = this.load();
     this.listeners = [];
+    this._stamp = 0;      // растёт при каждом save(), инвалидирует индекс порядка
+    this._orderIndex = null;
+    this._orderIndexStamp = -1;
   }
 
   load() {
@@ -57,12 +69,30 @@ class Store {
       return Object.assign(defaultState(), parsed);
     } catch (e) {
       console.error('Failed to load state', e);
+      // не затираем повреждённые данные молча: приложение иначе просто пересоздаёт
+      // демо-набор поверх них, и восстановить исходное уже нечем
+      try {
+        localStorage.setItem(STORAGE_KEY + '.corrupt.' + Date.now(), localStorage.getItem(STORAGE_KEY));
+      } catch (_) { /* места может не хватить — тогда просто продолжаем */ }
       return defaultState();
     }
   }
 
+  // запись без перерисовки — для посимвольного ввода, где ре-рендер сбил бы фокус
+  saveQuiet() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+      return true;
+    } catch (e) {
+      console.error('Не удалось сохранить состояние', e);
+      window.dispatchEvent(new CustomEvent('tasks:save-error', { detail: e }));
+      return false;
+    }
+  }
+
   save() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+    this._stamp++;
+    this.saveQuiet();
     this.emit();
   }
 
@@ -80,22 +110,23 @@ class Store {
   }
 
   // ---------------- Tasks ----------------
-  createTask({ title, notes = '', when = null, projectId = null, areaId = null, headingId = null, tags = [], deadline = null, priority = 0, repeat = null, repeatFromCompletion = false } = {}) {
+  createTask({ title, notes = '', when = null, projectId = null, areaId = null, headingId = null, tags = [], deadline = null, priority = 0, repeat = null, repeatFromCompletion = false, checklist = [], reminderTime = null, reminderRepeatMinutes = null } = {}) {
     const id = uid();
     const now = Date.now();
     const task = {
       id, title: title || 'Новая задача', notes,
-      checklist: [],
+      checklist,
       tags,
       when, // null | 'today' | 'evening' | 'someday' | 'YYYY-MM-DD'
       deadline, // null | 'YYYY-MM-DD'
       priority, // 0 none | 1 low | 2 medium | 3 high
       repeat, // null | 'daily' | 'weekly' | 'monthly'
       repeatFromCompletion, // true: next occurrence counts from completion day, not the scheduled day
-      reminderTime: null, // null | 'HH:MM' — fires a notification on the scheduled day
-      reminderRepeatMinutes: null, // null | number — re-fire every N minutes after reminderTime, same day
+      reminderTime, // null | 'HH:MM' — fires a notification on the scheduled day
+      reminderRepeatMinutes, // null | number — re-fire every N minutes after reminderTime, same day
       notifiedOn: null, // 'YYYY-MM-DD' of the last date a reminder notification fired
       lastNotifiedAt: null, // timestamp of the last notification, used to space out repeat reminders
+      spawnedTaskId: null, // id of the occurrence created when this repeating task was completed
       projectId, areaId, headingId,
       inInbox: !projectId && !areaId && !when,
       status: 'active', // active | completed | canceled | trashed
@@ -118,7 +149,7 @@ class Store {
       if (t.projectId || t.areaId || t.when) t.inInbox = false;
     }
     // heading only makes sense within its own project
-    if (patch.projectId !== undefined && t.headingId) {
+    if ((patch.projectId !== undefined || patch.headingId !== undefined) && t.headingId) {
       const h = this.state.headings[t.headingId];
       if (!h || h.projectId !== t.projectId) t.headingId = null;
     }
@@ -130,7 +161,7 @@ class Store {
     if (!t) return;
     t.notifiedOn = dateStr;
     t.lastNotifiedAt = Date.now();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+    this.saveQuiet();
   }
 
   dueReminders() {
@@ -139,8 +170,11 @@ class Store {
     const nowHM = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
     return this.allActiveTasks().filter(t => {
       if (!t.reminderTime) return false;
-      // a reminder without a future-scheduled date (no when, 'today', 'evening', 'someday', or today's date) applies today
-      const onToday = !t.when || t.when === 'today' || t.when === 'evening' || t.when === 'someday' || t.when === today;
+      // «Когда-нибудь» — сознательно отложенная задача, она не должна напоминать о себе сегодня
+      if (t.when === 'someday') return false;
+      // напоминание срабатывает у задач без даты, на сегодня/вечер и у просроченных
+      const onToday = !t.when || t.when === 'today' || t.when === 'evening'
+        || (isDateStr(t.when) && t.when <= today);
       if (!onToday) return false;
       if (nowHM < t.reminderTime) return false;
       if (t.notifiedOn !== today) return true; // hasn't fired yet today
@@ -156,19 +190,42 @@ class Store {
     if (t.status === 'completed') {
       t.status = 'active';
       t.completedAt = null;
+      // снятие галочки отменяет и следующее вхождение, созданное при выполнении,
+      // но только если его ещё не успели изменить
+      const spawned = t.spawnedTaskId ? this.state.tasks[t.spawnedTaskId] : null;
+      if (spawned && spawned.status === 'active' && !spawned.completedAt) {
+        delete this.state.tasks[spawned.id];
+        this.state.order.tasks = this.state.order.tasks.filter(x => x !== spawned.id);
+      }
+      t.spawnedTaskId = null;
     } else {
       t.status = 'completed';
       t.completedAt = Date.now();
       if (t.repeat) {
-        const base = (!t.repeatFromCompletion && /^\d{4}-\d{2}-\d{2}$/.test(t.when)) ? t.when : todayStr();
-        this.createTask({
-          title: t.title, notes: t.notes, when: nextRepeatDate(base, t.repeat),
-          projectId: t.projectId, areaId: t.areaId, headingId: t.headingId,
-          tags: t.tags.slice(), priority: t.priority, repeat: t.repeat, repeatFromCompletion: t.repeatFromCompletion,
-        });
+        const next = this.spawnNextOccurrence(t);
+        t.spawnedTaskId = next ? next.id : null;
       }
     }
     this.save();
+  }
+
+  // Следующее вхождение повторяющейся задачи: переносит и дедлайн, и напоминание,
+  // и чек-лист (со сброшенными галочками) — иначе повтор терял бы половину настроек.
+  spawnNextOccurrence(t) {
+    if (!t.repeat) return null;
+    const base = (!t.repeatFromCompletion && isDateStr(t.when)) ? t.when : todayStr();
+    const when = nextRepeatDate(base, t.repeat);
+    const shift = daysBetween(base, when);
+    return this.createTask({
+      title: t.title, notes: t.notes, when,
+      projectId: t.projectId, areaId: t.areaId, headingId: t.headingId,
+      tags: t.tags.slice(), priority: t.priority,
+      repeat: t.repeat, repeatFromCompletion: t.repeatFromCompletion,
+      deadline: isDateStr(t.deadline) ? addDays(t.deadline, shift) : t.deadline,
+      checklist: t.checklist.map(c => ({ id: uid(), text: c.text, completed: false })),
+      reminderTime: t.reminderTime,
+      reminderRepeatMinutes: t.reminderRepeatMinutes,
+    });
   }
 
   toggleCancel(id) {
@@ -196,14 +253,13 @@ class Store {
   duplicateTask(id) {
     const t = this.state.tasks[id];
     if (!t) return null;
-    const copy = this.createTask({
+    return this.createTask({
       title: t.title, notes: t.notes, when: t.when, projectId: t.projectId, areaId: t.areaId,
       headingId: t.headingId, tags: t.tags.slice(), deadline: t.deadline, priority: t.priority,
       repeat: t.repeat, repeatFromCompletion: t.repeatFromCompletion,
+      checklist: t.checklist.map(c => ({ id: uid(), text: c.text, completed: false })),
+      reminderTime: t.reminderTime, reminderRepeatMinutes: t.reminderRepeatMinutes,
     });
-    copy.checklist = t.checklist.map(c => ({ id: uid(), text: c.text, completed: false }));
-    this.save();
-    return copy;
   }
 
   deleteTaskPermanently(id) {
@@ -245,7 +301,7 @@ class Store {
     if (!t) return;
     const item = t.checklist.find(c => c.id === itemId);
     if (item) item.text = text;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+    this.saveQuiet();
   }
 
   removeChecklistItem(taskId, itemId) {
@@ -286,7 +342,11 @@ class Store {
     delete this.state.projects[id];
     Object.values(this.state.headings).forEach(h => { if (h.projectId === id) delete this.state.headings[h.id]; });
     Object.values(this.state.tasks).forEach(t => {
-      if (t.projectId === id) { t.projectId = null; t.headingId = null; t.inInbox = false; }
+      if (t.projectId !== id) return;
+      t.projectId = null;
+      t.headingId = null;
+      // осиротевшая задача без даты и области действительно неразобрана — её место во «Входящих»
+      t.inInbox = !t.when && !t.areaId;
     });
     this.save();
   }
@@ -333,7 +393,11 @@ class Store {
   }
 
   headingTasks(headingId) {
-    return this.orderedTasks(Object.values(this.state.tasks).filter(t => t.headingId === headingId && t.status === 'active'));
+    const h = this.state.headings[headingId];
+    if (!h) return [];
+    // проверяем и проект: иначе задача из другого проекта могла осесть в чужом разделе
+    return this.orderedTasks(Object.values(this.state.tasks)
+      .filter(t => t.headingId === headingId && t.projectId === h.projectId && t.status === 'active'));
   }
 
   // ---------------- Areas ----------------
@@ -354,7 +418,11 @@ class Store {
   deleteArea(id) {
     delete this.state.areas[id];
     Object.values(this.state.projects).forEach(p => { if (p.areaId === id) p.areaId = null; });
-    Object.values(this.state.tasks).forEach(t => { if (t.areaId === id) { t.areaId = null; t.inInbox = false; } });
+    Object.values(this.state.tasks).forEach(t => {
+      if (t.areaId !== id) return;
+      t.areaId = null;
+      t.inInbox = !t.when && !t.projectId;
+    });
     this.save();
   }
 
@@ -369,11 +437,23 @@ class Store {
   }
 
   // ---------------- Selectors ----------------
+  // Позиции всех задач одной картой: без неё сравнение через indexOf делало
+  // сортировку квадратичной и заметно тормозило на сотнях задач.
+  orderIndex() {
+    if (this._orderIndexStamp !== this._stamp) {
+      this._orderIndex = new Map(this.state.order.tasks.map((id, i) => [id, i]));
+      this._orderIndexStamp = this._stamp;
+    }
+    return this._orderIndex;
+  }
+
   orderedTasks(list) {
-    const order = this.state.order.tasks;
+    const pos = this.orderIndex();
+    const last = Number.MAX_SAFE_INTEGER;
     return list.slice().sort((a, b) => {
-      const ia = order.indexOf(a.id), ib = order.indexOf(b.id);
-      return ia - ib;
+      const ia = pos.has(a.id) ? pos.get(a.id) : last;
+      const ib = pos.has(b.id) ? pos.get(b.id) : last;
+      return ia !== ib ? ia - ib : a.createdAt - b.createdAt;
     });
   }
 
@@ -390,7 +470,7 @@ class Store {
     return this.orderedTasks(this.allActiveTasks().filter(t => {
       if (t.inInbox) return false;
       if (t.when === 'today' || t.when === 'evening') return true;
-      if (t.when && /^\d{4}-\d{2}-\d{2}$/.test(t.when) && t.when <= today) return true;
+      if (isDateStr(t.when) && t.when <= today) return true;
       return false;
     }));
   }
@@ -399,7 +479,7 @@ class Store {
     const today = todayStr();
     return this.orderedTasks(this.allActiveTasks().filter(t => {
       if (t.inInbox) return false;
-      return t.when && /^\d{4}-\d{2}-\d{2}$/.test(t.when) && t.when > today;
+      return isDateStr(t.when) && t.when > today;
     }));
   }
 
@@ -414,7 +494,7 @@ class Store {
   tasksByDate() {
     const map = {};
     this.allActiveTasks().forEach(t => {
-      if (t.when && /^\d{4}-\d{2}-\d{2}$/.test(t.when)) (map[t.when] ||= []).push(t);
+      if (isDateStr(t.when)) (map[t.when] ||= []).push(t);
     });
     return map;
   }
@@ -450,7 +530,13 @@ class Store {
   }
 
   projectTasksNoHeading(projectId) {
-    return this.orderedTasks(Object.values(this.state.tasks).filter(t => t.projectId === projectId && !t.headingId && t.status === 'active'));
+    return this.orderedTasks(Object.values(this.state.tasks).filter(t => {
+      if (t.projectId !== projectId || t.status !== 'active') return false;
+      if (!t.headingId) return true;
+      // задача с «повисшим» разделом должна показываться вверху, а не пропадать
+      const h = this.state.headings[t.headingId];
+      return !h || h.projectId !== projectId;
+    }));
   }
 
   areaDirectTasks(areaId) {
@@ -486,4 +572,4 @@ class Store {
 }
 
 export const store = new Store();
-export { uid, todayStr, formatDate, addDays, nextRepeatDate };
+export { uid, todayStr, formatDate, addDays, daysBetween, nextRepeatDate, isDateStr, STORAGE_KEY };

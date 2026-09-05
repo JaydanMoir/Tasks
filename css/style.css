@@ -107,6 +107,8 @@ html, body {
 }
 .quick-add-btn:hover { filter: brightness(1.06); }
 
+/* без этого display:flex ниже перебивает атрибут hidden и баннер не скрыть */
+.notif-banner[hidden] { display: none; }
 .notif-banner {
   position: relative;
   margin: 4px 12px 10px;
@@ -174,6 +176,11 @@ html, body {
   border-radius: 4px;
   padding: 1px 4px;
   flex-shrink: 0;
+  cursor: pointer;
+}
+.search-kbd:hover {
+  color: var(--text-secondary);
+  border-color: var(--text-tertiary);
 }
 
 .nav-lists {
@@ -427,6 +434,9 @@ html, body {
   overflow-y: auto;
   padding: 24px;
 }
+/* Без этого flex-колонка сплющивает секции, когда содержимое не влезает
+   по высоте: заголовок задачи схлопывался в полоску вместо прокрутки панели. */
+.detail-panel > * { flex-shrink: 0; }
 
 .detail-panel-header { display: flex; justify-content: flex-end; margin: -8px -8px 4px 0; }
 .detail-close-btn {
@@ -505,11 +515,7 @@ html, body {
 }
 .detail-checkbox-row input { flex-shrink: 0; }
 
-.reminder-time-picker { display: flex; align-items: center; gap: 6px; }
-.reminder-time-picker select { flex: 1; text-align: center; }
-.reminder-time-sep { color: var(--text-tertiary); font-weight: 700; }
-
-select.detail-select, input.detail-date {
+select.detail-select {
   width: 100%;
   padding: 6px 8px;
   border-radius: 6px;
@@ -562,17 +568,7 @@ select.detail-select, input.detail-date {
 }
 #quickAddTitle { font-size: 16px; font-weight: 600; padding-bottom: 8px; }
 #quickAddNotes { font-size: 13px; color: var(--text-secondary); padding-bottom: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
-.quick-add-date-input {
-  width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
-  margin-top: 10px;
-  background: var(--bg-main);
-  color: var(--text-primary);
-  font-size: 12.5px;
-  font-family: inherit;
-}
+#quickAddWhenDate { margin-top: 10px; }
 .quick-add-row { display: flex; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; align-items: center; }
 .quick-add-row select {
   flex: 1;
@@ -799,3 +795,305 @@ select.detail-select, input.detail-date {
 ::-webkit-scrollbar { width: 9px; }
 ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 5px; }
 @media (prefers-color-scheme: dark) { ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); } }
+
+/* ================= Барабанный выбор даты и времени (iOS-стиль) ================= */
+
+:root { --wheel-item-h: 34px; }
+
+body.picker-open { overflow: hidden; }
+
+.picker-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(0,0,0,0);
+  transition: background 0.22s ease;
+}
+.picker-overlay.open { background: rgba(0,0,0,0.32); }
+
+.picker-sheet {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg-main);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -8px 40px rgba(0,0,0,0.18);
+  transform: translateY(100%);
+  transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+  /* безопасная зона под «домашней полоской» айфона */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.picker-overlay.open .picker-sheet { transform: translateY(0); }
+
+@media (min-width: 640px) {
+  .picker-overlay { align-items: center; }
+  .picker-sheet {
+    border-radius: 14px;
+    max-width: 360px;
+    transform: translateY(12px) scale(0.98);
+    opacity: 0;
+    transition: transform 0.2s ease, opacity 0.2s ease;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.24);
+  }
+  .picker-overlay.open .picker-sheet { transform: none; opacity: 1; }
+}
+
+.picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.picker-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.picker-btn {
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 15px;
+  font-family: inherit;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  min-width: 68px;
+}
+.picker-btn:first-child { text-align: left; }
+.picker-btn:last-child { text-align: right; }
+.picker-btn.strong { font-weight: 600; }
+.picker-btn:hover { background: var(--row-hover); }
+
+.picker-clear {
+  display: block;
+  width: calc(100% - 24px);
+  margin: 0 12px 12px;
+  padding: 11px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--tag-bg);
+  color: var(--danger);
+  font-size: 15px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.picker-clear:hover { filter: brightness(0.96); }
+
+/* ----- сам барабан ----- */
+.picker-wheels {
+  position: relative;
+  display: flex;
+  padding: 4px 12px 10px;
+  /* края уводим в прозрачность — так строки «заворачиваются» за горизонт */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 14%, #000 86%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 14%, #000 86%, transparent 100%);
+}
+
+/* полоса выбора: две тонкие линии, как в референсе */
+.picker-band {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.picker-col { min-width: 0; }
+
+.wheel {
+  height: 100%;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  scrollbar-width: none;
+  outline: none;
+}
+.wheel::-webkit-scrollbar { display: none; }
+
+.wheel-pad {
+  /* половина окна минус половина строки — чтобы крайние значения вставали в центр */
+  height: calc((var(--wheel-item-h) * 7 - var(--wheel-item-h)) / 2);
+  flex-shrink: 0;
+}
+
+.wheel-item {
+  height: var(--wheel-item-h);
+  line-height: var(--wheel-item-h);
+  scroll-snap-align: center;
+  text-align: center;
+  font-size: 21px;
+  font-weight: 300;
+  letter-spacing: 0.2px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  will-change: transform, opacity;
+  transition: color 0.12s ease;
+  font-variant-numeric: tabular-nums;
+}
+.wheel-item.is-selected {
+  color: var(--text-primary);
+  font-weight: 400;
+}
+
+.wheel:focus-visible .wheel-item.is-selected { color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .picker-sheet { transition: none; }
+  .wheel-item { transform: none !important; filter: none !important; }
+}
+
+/* ----- поле-кнопка, открывающее пикер ----- */
+.date-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  min-height: 34px;
+}
+/* display:flex выше перебил бы атрибут hidden — возвращаем ему силу */
+.date-field[hidden] { display: none; }
+.date-field:hover { border-color: var(--text-tertiary); }
+.date-field.empty { color: var(--text-tertiary); }
+.date-field-clear {
+  color: var(--text-tertiary);
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.date-field-clear:hover { color: var(--danger); }
+
+@media (max-width: 640px) {
+  /* на телефоне цели нажатия должны быть крупнее */
+  .date-field { min-height: 40px; font-size: 14px; }
+  .picker-btn { min-height: 40px; }
+}
+
+/* ======================= Телефон: одна колонка ======================= */
+
+/* Кнопка-гамбургер видна только на узких экранах */
+.menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.menu-btn:hover { background: var(--row-hover); color: var(--text-primary); }
+
+.sidebar-scrim { display: none; }
+
+@media (max-width: 700px) {
+  /* Ни при каких классах не делим экран на колонки — места нет */
+  #app,
+  #app.detail-open,
+  #app.sidebar-collapsed,
+  #app.sidebar-collapsed.detail-open { grid-template-columns: 1fr; }
+
+  /* Высота через dvh: иначе панель браузера на iOS срезает низ списка */
+  #app { height: 100dvh; }
+
+  .menu-btn { display: flex; }
+
+  /* Сайдбар превращается в выдвижную панель */
+  #app .sidebar,
+  #app.sidebar-collapsed .sidebar {
+    display: flex;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(84vw, 300px);
+    z-index: 60;
+    transform: translateX(-100%);
+    transition: transform 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+    border-right: 1px solid var(--border);
+    box-shadow: 4px 0 24px rgba(0,0,0,0.18);
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+  #app.sidebar-open .sidebar { transform: none; }
+
+  .sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0,0,0,0.32);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.26s ease;
+  }
+  #app.sidebar-open .sidebar-scrim { opacity: 1; pointer-events: auto; }
+
+  .main-panel { border-right: 0; }
+  .main-header { padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 8px; }
+  .main-header h1 { font-size: 21px; }
+  .main-header-sub { margin-left: 0; margin-top: 4px; }
+
+  .task-list { padding-left: 12px; padding-right: 12px; }
+  /* строки задач должны переносить длинный текст, а не рвать его по буквам */
+  .task-title, .task-meta { min-width: 0; overflow-wrap: anywhere; }
+  .task-row { padding-top: 10px; padding-bottom: 10px; }
+
+  /* Панель деталей — отдельный экран поверх всего */
+  #app.detail-open .detail-panel {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    z-index: 70;
+    box-shadow: none;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    overflow-y: auto;
+  }
+
+  .fab {
+    right: 18px;
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    width: 52px;
+    height: 52px;
+  }
+
+  /* Модалки прижимаем к низу — так до них дотягивается большой палец */
+  .modal-overlay { align-items: flex-end; }
+  .modal {
+    width: 100%;
+    max-width: none;
+    border-radius: 14px 14px 0 0;
+    margin-bottom: 0;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  .quick-add-row { flex-wrap: wrap; }
+  .quick-add-row select, .quick-add-row button { min-height: 40px; }
+}
