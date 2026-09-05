@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Tasks</title>
-<link rel="stylesheet" href="css/style.css?v=11">
+<link rel="stylesheet" href="css/style.css?v=13">
 </head>
 <body>
 <div id="app">
@@ -88,7 +88,22 @@
 <!-- Quick Add Modal -->
 <div class="modal-overlay" id="quickAddOverlay">
   <div class="modal quick-add-modal">
-    <input type="text" id="quickAddTitle" placeholder="Название задачи" autocomplete="off">
+    <input type="text" id="quickAddTitle" placeholder="Что нужно сделать?" autocomplete="off" autocapitalize="sentences" enterkeyhint="done">
+
+    <!-- что распозналось из текста; заполняется на лету -->
+    <div class="parse-chips" id="quickAddChips" hidden></div>
+
+    <div class="quick-chips" id="quickAddQuickChips">
+      <button type="button" class="quick-chip" data-when="today">Сегодня</button>
+      <button type="button" class="quick-chip" data-when="tomorrow">Завтра</button>
+      <button type="button" class="quick-chip" data-when="evening">Вечером</button>
+      <button type="button" class="quick-chip" data-when="weekend">Выходные</button>
+      <button type="button" class="quick-chip" data-when="pick">Дата…</button>
+    </div>
+
+    <!-- появляется, только когда во вводе распознано время -->
+    <select id="quickAddLead" class="quick-add-lead" hidden></select>
+
     <input type="text" id="quickAddNotes" placeholder="Заметки" autocomplete="off">
     <button type="button" id="quickAddWhenDate" class="date-field empty" data-value="" hidden>📅 Выбрать дату</button>
     <div class="quick-add-row">
@@ -104,6 +119,7 @@
       </select>
       <button id="quickAddSubmit">Добавить</button>
     </div>
+    <div class="quick-add-hint">Можно писать сразу: «позвонить маме завтра в 18:00 !2 #дом»</div>
   </div>
 </div>
 
@@ -124,6 +140,6 @@
   <button id="toastUndo">Отменить</button>
 </div>
 
-<script type="module" src="js/app.js?v=11"></script>
+<script type="module" src="js/app.js?v=13"></script>
 </body>
 </html>

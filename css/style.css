@@ -1097,3 +1097,139 @@ body.picker-open { overflow: hidden; }
   .quick-add-row { flex-wrap: wrap; }
   .quick-add-row select, .quick-add-row button { min-height: 40px; }
 }
+
+/* ============ Быстрое добавление: разбор строки и быстрые даты ============ */
+
+.parse-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 8px 0 2px;
+}
+.parse-chips[hidden] { display: none; }
+
+.parse-chip {
+  font-size: 11.5px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  background: var(--tag-bg);
+  color: var(--tag-text);
+  white-space: nowrap;
+}
+.parse-chip.title {
+  background: transparent;
+  color: var(--text-primary);
+  font-weight: 600;
+  padding-left: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.parse-chip.when { background: rgba(74,125,252,0.14); color: var(--accent); }
+.parse-chip.time { background: rgba(217,130,43,0.16); color: #b96a1d; }
+.parse-chip.tag  { background: rgba(138,111,212,0.16); color: #7256bd; }
+.parse-chip.p1 { background: rgba(74,125,252,0.14); color: var(--accent); }
+.parse-chip.p2 { background: rgba(217,130,43,0.16); color: #b96a1d; }
+.parse-chip.p3 { background: rgba(224,71,62,0.14); color: var(--danger); }
+
+@media (prefers-color-scheme: dark) {
+  .parse-chip.time { color: #e0a05a; }
+  .parse-chip.tag  { color: #b49ae8; }
+  .parse-chip.p2   { color: #e0a05a; }
+}
+
+.quick-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 0 4px;
+}
+.quick-chip {
+  border: 1px solid var(--border);
+  background: var(--bg-main);
+  color: var(--text-secondary);
+  border-radius: 14px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.quick-chip:hover { border-color: var(--text-tertiary); color: var(--text-primary); }
+.quick-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+
+.quick-add-hint {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  padding-top: 10px;
+  line-height: 1.4;
+}
+
+@media (max-width: 640px) {
+  .quick-chip { padding: 8px 14px; font-size: 13.5px; }
+  .quick-add-hint { display: none; }   /* на телефоне место дороже подсказки */
+}
+
+/* ==================== Свайпы по строке задачи ==================== */
+
+.task-swipe {
+  position: relative;
+  overflow: hidden;       /* строка уезжает внутри своей дорожки */
+  border-radius: 7px;
+}
+
+.swipe-bg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  display: flex;
+  align-items: center;
+  font-size: 17px;
+  color: #fff;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+}
+.swipe-bg-done  { left: 0;  background: var(--accent-anytime); justify-content: flex-start; padding-left: 20px; }
+.swipe-bg-trash { right: 0; background: var(--danger);        justify-content: flex-end;   padding-right: 20px; }
+
+/* Подложку показываем только пока строку тянут. Класс вешаем на обёртку, а не
+   ловим через :has() — так проще и не зависит от поддержки селектора. */
+.task-swipe.swiping .swipe-bg { opacity: 0.55; }
+.task-swipe.at-done  .swipe-bg-done  { opacity: 1; }
+.task-swipe.at-trash .swipe-bg-trash { opacity: 1; }
+
+/* пока строка едет, под ней не должно просвечивать */
+.task-row.swiping {
+  position: relative;
+  z-index: 1;
+  background: var(--bg-main);
+  will-change: transform;
+}
+
+@media (hover: none) {
+  /* на тач-экранах корзина по :hover недостижима — её заменяет свайп */
+  .task-quick-trash { display: none; }
+  .task-row { padding-top: 11px; padding-bottom: 11px; }
+}
+
+/* поле «напомнить за» в быстром добавлении */
+.quick-add-lead {
+  width: 100%;
+  margin-top: 10px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+}
+.quick-add-lead[hidden] { display: none; }
+@media (max-width: 640px) { .quick-add-lead { min-height: 40px; font-size: 14px; } }

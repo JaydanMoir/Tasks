@@ -110,7 +110,7 @@ class Store {
   }
 
   // ---------------- Tasks ----------------
-  createTask({ title, notes = '', when = null, projectId = null, areaId = null, headingId = null, tags = [], deadline = null, priority = 0, repeat = null, repeatFromCompletion = false, checklist = [], reminderTime = null, reminderRepeatMinutes = null } = {}) {
+  createTask({ title, notes = '', when = null, projectId = null, areaId = null, headingId = null, tags = [], deadline = null, priority = 0, repeat = null, repeatFromCompletion = false, checklist = [], reminderTime = null, reminderRepeatMinutes = null, reminderLeadMinutes = null } = {}) {
     const id = uid();
     const now = Date.now();
     const task = {
@@ -124,7 +124,9 @@ class Store {
       repeatFromCompletion, // true: next occurrence counts from completion day, not the scheduled day
       reminderTime, // null | 'HH:MM' — fires a notification on the scheduled day
       reminderRepeatMinutes, // null | number — re-fire every N minutes after reminderTime, same day
+      reminderLeadMinutes, // null | number — extra early ping N minutes before reminderTime
       notifiedOn: null, // 'YYYY-MM-DD' of the last date a reminder notification fired
+      leadNotifiedOn: null, // 'YYYY-MM-DD' of the last date the early ping fired
       lastNotifiedAt: null, // timestamp of the last notification, used to space out repeat reminders
       spawnedTaskId: null, // id of the occurrence created when this repeating task was completed
       projectId, areaId, headingId,
@@ -156,32 +158,60 @@ class Store {
     this.save();
   }
 
-  markNotified(id, dateStr) {
+  // kind: 'main' — напоминание в назначенное время, 'lead' — предварительное «за N минут»
+  markNotified(id, dateStr, kind = 'main') {
     const t = this.state.tasks[id];
     if (!t) return;
-    t.notifiedOn = dateStr;
-    t.lastNotifiedAt = Date.now();
+    if (kind === 'lead') {
+      t.leadNotifiedOn = dateStr;
+    } else {
+      t.notifiedOn = dateStr;
+      t.lastNotifiedAt = Date.now();
+    }
     this.saveQuiet();
   }
 
+  // Предварительное напоминание считаем от времени задачи назад. Если отступ
+  // уводит за полночь, прижимаем к 00:00 того же дня — на предыдущий день
+  // напоминание не переносим, иначе оно приходит когда задачи ещё «нет».
+  leadTimeFor(t) {
+    if (!t.reminderTime || !t.reminderLeadMinutes) return null;
+    const [h, m] = t.reminderTime.split(':').map(Number);
+    const total = Math.max(0, h * 60 + m - t.reminderLeadMinutes);
+    return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+  }
+
+  // Возвращает список {task, kind}: у одной задачи за день может сработать
+  // и предварительное напоминание, и основное.
   dueReminders() {
     const today = todayStr();
     const now = new Date();
     const nowHM = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-    return this.allActiveTasks().filter(t => {
-      if (!t.reminderTime) return false;
+    const due = [];
+
+    this.allActiveTasks().forEach(t => {
+      if (!t.reminderTime) return;
       // «Когда-нибудь» — сознательно отложенная задача, она не должна напоминать о себе сегодня
-      if (t.when === 'someday') return false;
+      if (t.when === 'someday') return;
       // напоминание срабатывает у задач без даты, на сегодня/вечер и у просроченных
       const onToday = !t.when || t.when === 'today' || t.when === 'evening'
         || (isDateStr(t.when) && t.when <= today);
-      if (!onToday) return false;
-      if (nowHM < t.reminderTime) return false;
-      if (t.notifiedOn !== today) return true; // hasn't fired yet today
-      if (!t.reminderRepeatMinutes) return false; // already fired once, no repeat requested
+      if (!onToday) return;
+
+      // предварительное — только пока основное ещё не наступило
+      const lead = this.leadTimeFor(t);
+      if (lead && nowHM >= lead && nowHM < t.reminderTime && t.leadNotifiedOn !== today) {
+        due.push({ task: t, kind: 'lead' });
+      }
+
+      if (nowHM < t.reminderTime) return;
+      if (t.notifiedOn !== today) { due.push({ task: t, kind: 'main' }); return; }
+      if (!t.reminderRepeatMinutes) return; // already fired once, no repeat requested
       const elapsedMin = t.lastNotifiedAt ? (Date.now() - t.lastNotifiedAt) / 60000 : Infinity;
-      return elapsedMin >= t.reminderRepeatMinutes;
+      if (elapsedMin >= t.reminderRepeatMinutes) due.push({ task: t, kind: 'main' });
     });
+
+    return due;
   }
 
   toggleComplete(id) {
@@ -225,6 +255,7 @@ class Store {
       checklist: t.checklist.map(c => ({ id: uid(), text: c.text, completed: false })),
       reminderTime: t.reminderTime,
       reminderRepeatMinutes: t.reminderRepeatMinutes,
+      reminderLeadMinutes: t.reminderLeadMinutes,
     });
   }
 
@@ -259,6 +290,7 @@ class Store {
       repeat: t.repeat, repeatFromCompletion: t.repeatFromCompletion,
       checklist: t.checklist.map(c => ({ id: uid(), text: c.text, completed: false })),
       reminderTime: t.reminderTime, reminderRepeatMinutes: t.reminderRepeatMinutes,
+      reminderLeadMinutes: t.reminderLeadMinutes,
     });
   }
 

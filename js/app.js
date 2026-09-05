@@ -1,5 +1,6 @@
-import { store, todayStr, addDays, formatDate, isDateStr } from './store.js?v=11';
-import { openDatePicker, openTimePicker, closePicker, isPickerOpen } from './wheelpicker.js?v=11';
+import { store, todayStr, addDays, formatDate, isDateStr } from './store.js?v=13';
+import { openDatePicker, openTimePicker, closePicker, isPickerOpen } from './wheelpicker.js?v=13';
+import { parseQuickInput, describeWhen } from './nlp.js?v=13';
 
 // ---------------- UI state (not persisted) ----------------
 let currentView = { type: 'today' };
@@ -38,6 +39,22 @@ function fmtDate(dateStr) {
 
 function isOverdue(dateStr) {
   return isDateStr(dateStr) && dateStr < todayStr();
+}
+
+// Варианты предварительного напоминания. По умолчанию его нет — задача пингует
+// ровно в назначенное время, как и раньше.
+const LEAD_OPTIONS = [
+  { value: 5, label: '5 минут' },
+  { value: 10, label: '10 минут' },
+  { value: 15, label: '15 минут' },
+  { value: 30, label: '30 минут' },
+  { value: 60, label: '1 час' },
+  { value: 120, label: '2 часа' },
+  { value: 180, label: '3 часа' },
+];
+
+function formatLead(min) {
+  return LEAD_OPTIONS.find(o => o.value === min)?.label || `${min} мин.`;
 }
 
 // Переименование проекта/области идёт через contentEditable на <h1>, а не через <input>.
@@ -208,7 +225,7 @@ function taskRowHtml(task, opts = {}) {
   if (task.notes && task.notes.trim()) metaBits.push(`<span class="task-meta-item">✎</span>`);
   if (task.deadline) metaBits.push(`<span class="deadline-pill">${fmtDate(task.deadline)}</span>`);
   if (task.when === 'evening') metaBits.push(`<span class="task-meta-item">🌙 вечер</span>`);
-  if (task.reminderTime) metaBits.push(`<span class="task-meta-item" title="${task.reminderRepeatMinutes ? 'Повторяется каждые ' + task.reminderRepeatMinutes + ' мин.' : 'Однократное напоминание'}">⏰ ${task.reminderTime}${task.reminderRepeatMinutes ? ' ⟳' : ''}</span>`);
+  if (task.reminderTime) metaBits.push(`<span class="task-meta-item" title="${task.reminderLeadMinutes ? 'Предупредит за ' + formatLead(task.reminderLeadMinutes) + '. ' : ''}${task.reminderRepeatMinutes ? 'Повторяется каждые ' + task.reminderRepeatMinutes + ' мин.' : 'Однократное напоминание'}">⏰ ${task.reminderTime}${task.reminderRepeatMinutes ? ' ⟳' : ''}</span>`);
   if (task.repeat) metaBits.push(`<span class="task-meta-item" title="Повторяется">🔁</span>`);
   if (isOverdue(task.when)) metaBits.push(`<span class="deadline-pill">просрочено</span>`);
 
@@ -221,15 +238,20 @@ function taskRowHtml(task, opts = {}) {
     ? `<span class="task-quick-trash" data-quick-trash="${task.id}" title="Удалить в корзину">🗑</span>`
     : '';
 
-  return `<div class="${cls.join(' ')}" data-id="${task.id}" data-priority="${task.priority || 0}" draggable="true">
-    <div class="checkbox" data-checkbox="${task.id}">
-      <svg viewBox="0 0 10 10"><path d="M1 5l3 3 5-6" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  // Обёртка держит подложку с действиями, которая открывается при свайпе строки
+  return `<div class="task-swipe">
+    <div class="swipe-bg swipe-bg-done" aria-hidden="true">✓</div>
+    <div class="swipe-bg swipe-bg-trash" aria-hidden="true">🗑</div>
+    <div class="${cls.join(' ')}" data-id="${task.id}" data-priority="${task.priority || 0}" draggable="true">
+      <div class="checkbox" data-checkbox="${task.id}">
+        <svg viewBox="0 0 10 10"><path d="M1 5l3 3 5-6" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="task-main">
+        <div class="task-title">${esc(task.title)}</div>
+        ${metaBits.length ? `<div class="task-meta">${metaBits.join('')}</div>` : ''}
+      </div>
+      ${quickTrash}
     </div>
-    <div class="task-main">
-      <div class="task-title">${esc(task.title)}</div>
-      ${metaBits.length ? `<div class="task-meta">${metaBits.join('')}</div>` : ''}
-    </div>
-    ${quickTrash}
   </div>`;
 }
 
@@ -674,7 +696,81 @@ function bindTaskListEvents() {
       }
       dragTaskId = null;
     });
+    bindSwipe(el);
   });
+}
+
+// ---------------- Свайпы по строке задачи ----------------
+// На телефоне удалить задачу было нельзя вовсе: корзина показывалась только по
+// :hover, а долгое нажатие открывает контекстное меню не во всех браузерах.
+// Влево — в корзину, вправо — выполнить.
+const SWIPE_TRIGGER = 72;   // px, после которых действие срабатывает
+const SWIPE_MAX = 110;
+
+function bindSwipe(row) {
+  const lane = row.parentElement;            // .task-swipe — на нём живёт подложка
+  if (!lane || !lane.classList.contains('task-swipe')) return;
+  let startX = 0, startY = 0, dx = 0;
+  let tracking = false, decided = false, horizontal = false;
+
+  const reset = (animate = true) => {
+    row.style.transition = animate ? 'transform 0.18s ease' : '';
+    row.style.transform = '';
+    row.classList.remove('swiping');
+    lane.classList.remove('swiping', 'at-done', 'at-trash');
+    if (animate) setTimeout(() => { row.style.transition = ''; }, 200);
+  };
+
+  row.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    dx = 0;
+    tracking = true; decided = false; horizontal = false;
+    row.style.transition = '';
+  }, { passive: true });
+
+  row.addEventListener('touchmove', (e) => {
+    if (!tracking) return;
+    const t = e.touches[0];
+    const ddx = t.clientX - startX;
+    const ddy = t.clientY - startY;
+
+    // Направление определяем один раз: иначе строка ползёт при обычной
+    // вертикальной прокрутке списка.
+    if (!decided) {
+      if (Math.abs(ddx) < 8 && Math.abs(ddy) < 8) return;
+      decided = true;
+      horizontal = Math.abs(ddx) > Math.abs(ddy) * 1.4;
+      if (horizontal) { row.classList.add('swiping'); lane.classList.add('swiping'); }
+    }
+    if (!horizontal) { tracking = false; return; }
+
+    e.preventDefault();               // забираем жест у прокрутки страницы
+    dx = Math.max(-SWIPE_MAX, Math.min(SWIPE_MAX, ddx));
+    row.style.transform = `translateX(${dx}px)`;
+    lane.classList.toggle('at-done', dx >= SWIPE_TRIGGER);
+    lane.classList.toggle('at-trash', dx <= -SWIPE_TRIGGER);
+  }, { passive: false });
+
+  const finish = () => {
+    if (!tracking || !horizontal) { tracking = false; return; }
+    tracking = false;
+    const id = row.dataset.id;
+    if (dx <= -SWIPE_TRIGGER) {
+      reset(false);
+      store.trashTask(id);
+      if (selectedTaskId === id) selectedTaskId = null;
+      showToast('Задача удалена', () => store.restoreTask(id));
+    } else if (dx >= SWIPE_TRIGGER) {
+      reset(false);
+      store.toggleComplete(id);
+    } else {
+      reset(true);
+    }
+  };
+  row.addEventListener('touchend', finish);
+  row.addEventListener('touchcancel', () => { tracking = false; reset(true); });
 }
 
 // ---------------- Detail panel ----------------
@@ -752,6 +848,10 @@ function renderDetail() {
       <div id="detReminderWrap" style="margin-top:6px;">
         <div class="detail-label" style="margin-top:8px;">Напоминание</div>
         ${dateFieldHtml('detReminderTime', task.reminderTime, 'Без напоминания', '⏰')}
+        <select class="detail-select" id="detReminderLead" style="margin-top:6px; ${task.reminderTime ? '' : 'display:none'}">
+          <option value="" ${!task.reminderLeadMinutes ? 'selected' : ''}>Не напоминать заранее</option>
+          ${LEAD_OPTIONS.map(o => `<option value="${o.value}" ${task.reminderLeadMinutes === o.value ? 'selected' : ''}>Напомнить за ${o.label}</option>`).join('')}
+        </select>
         <select class="detail-select" id="detReminderRepeat" style="margin-top:6px; ${task.reminderTime ? '' : 'display:none'}">
           <option value="" ${!task.reminderRepeatMinutes ? 'selected' : ''}>Не повторять</option>
           <option value="15" ${task.reminderRepeatMinutes === 15 ? 'selected' : ''}>Каждые 15 минут</option>
@@ -892,13 +992,22 @@ function renderDetail() {
     kind: 'time',
     title: 'Напоминание',
     allowClear: true,
+    // снятие времени убирает и повтор, и предварительное — они без него бессмысленны
     onPick: (t) => store.updateTask(task.id, t
-      ? { reminderTime: t, notifiedOn: null, lastNotifiedAt: null }
-      : { reminderTime: null, reminderRepeatMinutes: null, notifiedOn: null, lastNotifiedAt: null }),
+      ? { reminderTime: t, notifiedOn: null, lastNotifiedAt: null, leadNotifiedOn: null }
+      : { reminderTime: null, reminderRepeatMinutes: null, reminderLeadMinutes: null,
+          notifiedOn: null, lastNotifiedAt: null, leadNotifiedOn: null }),
   });
   const reminderRepeatInput = $('#detReminderRepeat');
   if (reminderRepeatInput) reminderRepeatInput.addEventListener('change', (e) => {
     store.updateTask(task.id, { reminderRepeatMinutes: e.target.value ? Number(e.target.value) : null });
+  });
+  const reminderLeadInput = $('#detReminderLead');
+  if (reminderLeadInput) reminderLeadInput.addEventListener('change', (e) => {
+    store.updateTask(task.id, {
+      reminderLeadMinutes: e.target.value ? Number(e.target.value) : null,
+      leadNotifiedOn: null, // сменили отступ — предварительное должно сработать заново
+    });
   });
   $('#detRepeat').addEventListener('change', (e) => {
     const wrap = $('#detRepeatFromCompletionWrap');
@@ -1005,6 +1114,12 @@ function populateQuickAddProjects() {
   sel.innerHTML = opts.join('');
 }
 
+// Ручной выбор даты (селект или чип) перебивает распознанное из текста:
+// пользователь, ткнувший «Завтра», не должен получить другую дату из-за слова в названии.
+let quickAddWhenTouched = false;
+let quickAddParsed = null;
+let quickAddDefaultWhen = '';
+
 function openQuickAdd() {
   closePalette();
   closePicker();
@@ -1012,12 +1127,111 @@ function openQuickAdd() {
   populateQuickAddProjects();
   $('#quickAddTitle').value = '';
   $('#quickAddNotes').value = '';
-  $('#quickAddWhen').value = currentView.type === 'today' ? 'today' : (currentView.type === 'someday' ? 'someday' : '');
+  quickAddDefaultWhen = currentView.type === 'today' ? 'today' : (currentView.type === 'someday' ? 'someday' : '');
+  $('#quickAddWhen').value = quickAddDefaultWhen;
+  // Значение селекта по умолчанию — это не «выбор пользователя»: набранное «завтра»
+  // должно его перебивать. Флаг взводится только от реального касания.
+  quickAddWhenTouched = false;
+  quickAddParsed = null;
   setQuickAddDate(null);
+  $('#quickAddLead').value = '';
+  $('#quickAddLead').hidden = true;
   $('#quickAddWhenDate').hidden = true;
   if (currentView.type === 'project') $('#quickAddProject').value = currentView.id;
+  renderQuickAddParse();
   $('#quickAddOverlay').classList.add('open');
   setTimeout(() => $('#quickAddTitle').focus(), 30);
+}
+
+// Показываем разобранное явно — иначе непонятно, почему из названия пропали слова
+function renderQuickAddParse() {
+  const raw = $('#quickAddTitle').value;
+  quickAddParsed = parseQuickInput(raw);
+
+  // Селект и поле даты подтягиваем к распознанному: иначе чипс показывал «Завтра»,
+  // а список под ним — «Сегодня», и было неясно, что в итоге сохранится.
+  if (!quickAddWhenTouched) {
+    const w = quickAddParsed.when;
+    const sel = $('#quickAddWhen');
+    if (isDateStr(w)) {
+      sel.value = 'date';
+      setQuickAddDate(w);
+      $('#quickAddWhenDate').hidden = false;
+    } else {
+      sel.value = w || quickAddDefaultWhen;
+      setQuickAddDate(null);
+      $('#quickAddWhenDate').hidden = true;
+    }
+    syncQuickChipState();
+  }
+
+  // «Напомнить за» имеет смысл только при заданном времени — иначе не от чего отсчитывать
+  const leadSel = $('#quickAddLead');
+  leadSel.hidden = !quickAddParsed.time;
+  if (quickAddParsed.time && !leadSel.dataset.filled) {
+    leadSel.innerHTML = `<option value="">Не напоминать заранее</option>` +
+      LEAD_OPTIONS.map(o => `<option value="${o.value}">Напомнить за ${o.label}</option>`).join('');
+    leadSel.dataset.filled = '1';
+  }
+
+  const chips = [];
+  if (quickAddParsed.when) {
+    chips.push(`<span class="parse-chip when">📅 ${esc(describeWhen(quickAddParsed.when))}</span>`);
+  }
+  if (quickAddParsed.time) chips.push(`<span class="parse-chip time">⏰ ${esc(quickAddParsed.time)}</span>`);
+  if (quickAddParsed.priority) {
+    const names = { 1: 'Низкий', 2: 'Средний', 3: 'Высокий' };
+    chips.push(`<span class="parse-chip p${quickAddParsed.priority}">❗ ${names[quickAddParsed.priority]}</span>`);
+  }
+  quickAddParsed.tags.forEach(t => chips.push(`<span class="parse-chip tag">#${esc(t)}</span>`));
+  // заголовок показываем всегда, когда из строки что-то вырезано — иначе непонятно,
+  // куда делись слова, особенно если распознанную дату потом переопределили чипом
+  if (quickAddParsed.title && quickAddParsed.title !== raw.trim()) {
+    chips.unshift(`<span class="parse-chip title">${esc(quickAddParsed.title)}</span>`);
+  }
+  const box = $('#quickAddChips');
+  box.innerHTML = chips.join('');
+  box.hidden = !chips.length;
+}
+
+function setQuickChip(kind) {
+  quickAddWhenTouched = true;
+  const sel = $('#quickAddWhen');
+  if (kind === 'today') { sel.value = 'today'; $('#quickAddWhenDate').hidden = true; }
+  else if (kind === 'evening') { sel.value = 'evening'; $('#quickAddWhenDate').hidden = true; }
+  else if (kind === 'tomorrow') { sel.value = 'date'; setQuickAddDate(addDays(todayStr(), 1)); $('#quickAddWhenDate').hidden = false; }
+  else if (kind === 'weekend') {
+    const now = new Date();
+    sel.value = 'date';
+    setQuickAddDate(addDays(todayStr(), (6 - now.getDay() + 7) % 7));
+    $('#quickAddWhenDate').hidden = false;
+  } else if (kind === 'pick') {
+    sel.value = 'date';
+    $('#quickAddWhenDate').hidden = false;
+    openDatePicker({
+      value: $('#quickAddWhenDate').dataset.value || todayStr(),
+      title: 'Когда',
+      onPick: (d) => d && setQuickAddDate(d),
+    });
+  }
+  syncQuickChipState();
+  renderQuickAddParse();
+}
+
+function syncQuickChipState() {
+  const sel = $('#quickAddWhen').value;
+  const date = $('#quickAddWhenDate').dataset.value;
+  const now = new Date();
+  // подсвечиваем чип по фактическому состоянию полей — неважно, задано оно
+  // вручную или подтянуто из распознанного текста
+  const active = sel === 'today' ? 'today'
+    : sel === 'evening' ? 'evening'
+    : sel === 'date' && date === addDays(todayStr(), 1) ? 'tomorrow'
+    : sel === 'date' && date === addDays(todayStr(), (6 - now.getDay() + 7) % 7) ? 'weekend'
+    : sel === 'date' ? 'pick' : null;
+  $$('#quickAddQuickChips .quick-chip').forEach(el => {
+    el.classList.toggle('active', el.dataset.when === active);
+  });
 }
 function closeQuickAdd() {
   $('#quickAddOverlay').classList.remove('open');
@@ -1030,11 +1244,16 @@ function setQuickAddDate(value) {
   el.textContent = value ? `📅 ${fmtDate(value)}` : '📅 Выбрать дату';
 }
 function submitQuickAdd() {
-  const title = $('#quickAddTitle').value.trim();
-  if (!title) { closeQuickAdd(); return; }
-  const notes = $('#quickAddNotes').value.trim();
+  const raw = $('#quickAddTitle').value.trim();
+  if (!raw) { closeQuickAdd(); return; }
+  const parsed = parseQuickInput(raw);
+  // если из строки ничего не вычленилось, заголовком остаётся вся строка
+  const title = parsed.title || raw;
+
   const whenSel = $('#quickAddWhen').value;
-  const when = whenSel === 'date' ? ($('#quickAddWhenDate').dataset.value || todayStr()) : (whenSel || null);
+  const manualWhen = whenSel === 'date' ? ($('#quickAddWhenDate').dataset.value || todayStr()) : (whenSel || null);
+  const when = quickAddWhenTouched ? manualWhen : (parsed.when ?? manualWhen);
+
   const projectId = $('#quickAddProject').value || null;
   let areaId = null;
   if (projectId) {
@@ -1043,8 +1262,19 @@ function submitQuickAdd() {
   } else if (currentView.type === 'area') {
     areaId = currentView.id;
   }
-  store.createTask({ title, notes, when, projectId, areaId });
+
+  const tags = parsed.tags.map(name => store.createTag(name).id);
+
+  store.createTask({
+    title,
+    notes: $('#quickAddNotes').value.trim(),
+    when, projectId, areaId, tags,
+    priority: parsed.priority,
+    reminderTime: parsed.time,
+    reminderLeadMinutes: parsed.time && $('#quickAddLead').value ? Number($('#quickAddLead').value) : null,
+  });
   closeQuickAdd();
+  showToast(`Добавлено: ${title}`);
 }
 
 // ---------------- Command Palette ----------------
@@ -1167,10 +1397,14 @@ function requestNotifPermission() {
 function fireReminderNotifications() {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   const today = todayStr();
-  store.dueReminders().forEach(t => {
+  store.dueReminders().forEach(({ task: t, kind }) => {
+    const body = kind === 'lead'
+      ? `Через ${formatLead(t.reminderLeadMinutes)} — в ${t.reminderTime}`
+      : (t.notes && t.notes.trim() ? t.notes.trim() : `Напоминание на ${t.reminderTime}`);
     const n = new Notification(t.title, {
-      body: t.notes && t.notes.trim() ? t.notes.trim() : `Напоминание на ${t.reminderTime}`,
-      tag: 'task-' + t.id,
+      body,
+      // разные tag: предварительное не должно заменять собой основное
+      tag: `task-${t.id}-${kind}`,
     });
     n.onclick = () => {
       window.focus();
@@ -1179,7 +1413,7 @@ function fireReminderNotifications() {
       renderAll();
       n.close();
     };
-    store.markNotified(t.id, today);
+    store.markNotified(t.id, today, kind);
   });
 }
 
@@ -1320,7 +1554,16 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#btnQuickAdd').addEventListener('click', openQuickAdd);
   $('#btnFab').addEventListener('click', openQuickAdd);
   $('#quickAddSubmit').addEventListener('click', submitQuickAdd);
+  $('#quickAddTitle').addEventListener('input', renderQuickAddParse);
+  $('#quickAddQuickChips').addEventListener('click', (e) => {
+    const chip = e.target.closest('.quick-chip');
+    if (chip) setQuickChip(chip.dataset.when);
+  });
+
   $('#quickAddWhen').addEventListener('change', (e) => {
+    quickAddWhenTouched = true;
+    syncQuickChipState();
+    renderQuickAddParse();
     const isDate = e.target.value === 'date';
     $('#quickAddWhenDate').hidden = !isDate;
     if (!isDate) return;
