@@ -563,12 +563,12 @@ function renderCalendarHtml() {
         ${shown.map(t => `<div class="cal-event ${t.status === 'completed' ? 'cal-event-done' : ''}" data-cal-task="${t.id}" style="--flag:${priorityColor(t.priority)}">${esc(t.title)}</div>`).join('')}
         ${more > 0 ? `<div class="cal-more">+${more}</div>` : ''}
       </div>
-      <!-- На телефоне названия в ячейку не помещаются — там вместо них точки.
-           Рисуем оба варианта и переключаем в CSS: иначе вид зависел бы от
-           ширины на момент отрисовки и ломался при повороте экрана. -->
-      <div class="cal-dots" aria-hidden="true">
-        ${shown.map(t => `<span class="cal-dot" style="--flag:${priorityColor(t.priority)}"></span>`).join('')}
-      </div>
+      <!-- На телефоне названия в ячейку не помещаются. Точки там врали: их
+           рисовалось не больше трёх, и три задачи выглядели так же, как десять.
+           Показываем точное число. Рисуем оба варианта и переключаем в CSS —
+           иначе вид зависел бы от ширины на момент отрисовки и ломался при
+           повороте экрана. -->
+      ${items.length ? `<div class="cal-count ${items.some(t => t.priority === 3) ? 'urgent' : ''}">${items.length}</div>` : '<div class="cal-count empty"></div>'}
     </div>`;
   }
 

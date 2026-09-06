@@ -2010,3 +2010,39 @@ html { touch-action: manipulation; }
 @media (max-width: 640px) {
   .quick-add-row #quickAddWhenDate { min-height: 44px; font-size: 15px; }
 }
+
+/* Число задач под днём вместо точек: точек рисовалось максимум три, и день
+   с тремя задачами выглядел так же, как день с десятью. Красным — если среди
+   задач дня есть высокий приоритет. */
+.cal-count { display: none; }
+.cal-dots { display: none; }
+
+@media (max-width: 700px) {
+  /* Счётчик — значком в углу, как бейдж на иконке приложения. Под числом дня
+     он читался как вторая дата: две цифры одна над другой глаз воспринимает
+     парой. В углу форма и место сразу говорят, что это не дата. */
+  .cal-cell { position: relative; aspect-ratio: 1 / 1.1; gap: 0; }
+  .cal-count {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--tag-bg);
+    color: var(--tag-text);
+    font-size: 9.5px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  /* значок вынесен из потока, поэтому пустой день просто ничего не рисует */
+  .cal-count.empty { display: none; }
+  .cal-count.urgent { background: var(--danger); color: #fff; }
+
+  .cal-daynum { width: 30px; height: 30px; font-size: 15px; }
+}
