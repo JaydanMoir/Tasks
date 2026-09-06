@@ -6,6 +6,7 @@ import { isNativeApp, initNativeNotifications, requestPermission as requestNativ
 import { bindDetailBackSwipe, bindSidebarSwipe, EDGE_ZONE } from './edgeswipe.js?v=15';
 import { exportBackup } from './backup.js?v=15';
 import { tapLight, tapMedium, tapSuccess } from './haptics.js?v=15';
+import { askText, askConfirm } from './dialog.js?v=15';
 
 // ---------------- UI state (not persisted) ----------------
 let currentView = { type: 'today' };
@@ -22,6 +23,7 @@ const LIST_META = {
   calendar: { title: 'Календарь', color: 'var(--accent-upcoming)', glyph: '🗓' },
   anytime: { title: 'В любое время', color: 'var(--accent-anytime)', glyph: '≡' },
   someday: { title: 'Когда-нибудь', color: 'var(--accent-someday)', glyph: '🌙' },
+  overdue: { title: 'Просрочено', color: 'var(--danger)', glyph: '!' },
   logbook: { title: 'Журнал', color: 'var(--accent-logbook)', glyph: '✓' },
   trash: { title: 'Корзина', color: 'var(--accent-trash)', glyph: '🗑' },
 };
@@ -51,6 +53,9 @@ function isOverdue(dateStr) {
 // сегодняшняя — единственный признак опоздания подсказывали часы на телефоне.
 function isTaskOverdue(task) {
   if (isOverdue(task.when)) return true;
+  // Дедлайн тоже мог пройти: задача без даты, но с просроченным сроком сдачи
+  // не получала никакой отметки вовсе.
+  if (isOverdue(task.deadline)) return true;
   const today = todayStr();
   const onToday = task.when === 'today' || task.when === 'evening' || task.when === today;
   if (!onToday || !task.reminderTime) return false;
@@ -79,13 +84,17 @@ function renderSidebar() {
   const counts = {
     inbox: store.inboxTasks().length,
     today: store.todayTasks().length,
+    overdue: store.overdueTasks().length,
     upcoming: store.upcomingTasks().length,
     anytime: store.anytimeTasks().length,
     someday: store.somedayTasks().length,
     logbook: 0, // архив выполненного растёт бесконечно — счётчик здесь только шумит
     trash: store.trashTasks().length,
   };
-  nav.innerHTML = Object.keys(LIST_META).map(key => {
+  nav.innerHTML = Object.keys(LIST_META).filter(key =>
+    // пустой список просрочки — лишняя строка в меню и лишняя тревога
+    key !== 'overdue' || counts.overdue > 0 || currentView.type === 'overdue'
+  ).map(key => {
     const meta = LIST_META[key];
     const active = currentView.type === key;
     const count = counts[key];
@@ -184,12 +193,12 @@ function renderSidebar() {
     });
   });
   tree.querySelectorAll('[data-delete-area]').forEach(el => {
-    el.addEventListener('click', (e) => {
+    el.addEventListener('click', async (e) => {
       e.stopPropagation();
       const id = el.dataset.deleteArea;
       const area = store.state.areas[id];
       if (!area) return;
-      if (confirm(`Удалить область «${area.title}»? Проекты и задачи в ней не удалятся, а станут неразобранными.`)) {
+      if (await askConfirm({ title: `Удалить область «${area.title}»?`, message: 'Проекты и задачи в ней не удалятся, а станут неразобранными.', confirmLabel: 'Удалить', danger: true })) {
         store.deleteArea(id);
         if (currentView.type === 'area' && currentView.id === id) currentView = { type: 'today' };
         renderAll();
@@ -197,12 +206,12 @@ function renderSidebar() {
     });
   });
   tree.querySelectorAll('[data-delete-project]').forEach(el => {
-    el.addEventListener('click', (e) => {
+    el.addEventListener('click', async (e) => {
       e.stopPropagation();
       const id = el.dataset.deleteProject;
       const project = store.state.projects[id];
       if (!project) return;
-      if (confirm(`Удалить проект «${project.title}»? Задачи в нём не удалятся, а станут неразобранными.`)) {
+      if (await askConfirm({ title: `Удалить проект «${project.title}»?`, message: 'Задачи в нём не удалятся, а станут неразобранными.', confirmLabel: 'Удалить', danger: true })) {
         store.deleteProject(id);
         if (currentView.type === 'project' && currentView.id === id) currentView = { type: 'today' };
         renderAll();
@@ -225,11 +234,17 @@ function taskRowHtml(task, opts = {}) {
   tags.forEach(t => metaBits.push(`<span class="tag-pill" data-tag-filter="${t.id}">${esc(t.title)}</span>`));
   if (task.checklist.length) metaBits.push(`<span class="task-meta-item">☑ ${checklistDone}/${task.checklist.length}</span>`);
   if (task.notes && task.notes.trim()) metaBits.push(`<span class="task-meta-item">✎</span>`);
-  if (task.deadline) metaBits.push(`<span class="deadline-pill">${fmtDate(task.deadline)}</span>`);
+  // Флажок и «до» обязательны: голая дата в красной плашке читалась как дата
+  // самой задачи, и задача на сегодня со вчерашним дедлайном выглядела так,
+  // будто она вчерашняя и почему-то попала в сегодняшний список.
+  if (task.deadline) {
+    const late = isOverdue(task.deadline) ? ' late' : '';
+    metaBits.push(`<span class="deadline-pill${late}">🏁 до ${fmtDate(task.deadline)}</span>`);
+  }
   if (task.when === 'evening') metaBits.push(`<span class="task-meta-item">🌙 вечер</span>`);
   if (task.reminderTime) metaBits.push(`<span class="task-meta-item" title="${task.reminderLeadMinutes ? 'Предупредит за ' + formatLead(task.reminderLeadMinutes) + '. ' : ''}${task.reminderRepeatMinutes ? 'Повторяется каждые ' + task.reminderRepeatMinutes + ' мин.' : 'Однократное напоминание'}">⏰ ${task.reminderTime}${task.reminderRepeatMinutes ? ' ⟳' : ''}</span>`);
   if (task.repeat) metaBits.push(`<span class="task-meta-item" title="Повторяется">🔁</span>`);
-  if (isTaskOverdue(task)) metaBits.push(`<span class="deadline-pill">просрочено</span>`);
+  if (isTaskOverdue(task)) metaBits.push(`<span class="deadline-pill late">просрочено</span>`);
 
   const cls = ['task-row'];
   if (task.status === 'completed') cls.push('completed');
@@ -240,9 +255,16 @@ function taskRowHtml(task, opts = {}) {
     ? `<span class="task-quick-trash" data-quick-trash="${task.id}" title="Удалить в корзину">🗑</span>`
     : '';
 
+  // Подложка обязана показывать то, что жест сделает на самом деле: в журнале
+  // свайп вправо не выполняет задачу, а возвращает её в работу, и зелёная
+  // галочка там читалась ровно наоборот.
+  const done = task.status === 'completed' || task.status === 'canceled';
+  const swipeRightGlyph = task.status === 'trashed' || done ? '↺' : '✓';
+  const laneClass = task.status === 'trashed' ? 'task-swipe no-trash' : (done ? 'task-swipe restore' : 'task-swipe');
+
   // Обёртка держит подложку с действиями, которая открывается при свайпе строки
-  return `<div class="task-swipe">
-    <div class="swipe-bg swipe-bg-done" aria-hidden="true">✓</div>
+  return `<div class="${laneClass}">
+    <div class="swipe-bg swipe-bg-done" aria-hidden="true">${swipeRightGlyph}</div>
     <div class="swipe-bg swipe-bg-trash" aria-hidden="true">🗑</div>
     <div class="${cls.join(' ')}" data-id="${task.id}" data-priority="${task.priority || 0}" draggable="true">
       <div class="checkbox" data-checkbox="${task.id}">
@@ -270,22 +292,22 @@ function headingHtml(h) {
 
 function bindProjectHeadingEvents() {
   const addBtn = $('[data-add-heading]');
-  if (addBtn) addBtn.addEventListener('click', () => {
-    const title = prompt('Название раздела:');
+  if (addBtn) addBtn.addEventListener('click', async () => {
+    const title = await askText({ title: 'Новый раздел', placeholder: 'Название раздела', confirmLabel: 'Создать' });
     if (title && title.trim()) store.createHeading({ title: title.trim(), projectId: addBtn.dataset.addHeading });
   });
   $$('[data-heading-id]').forEach(el => {
-    el.addEventListener('dblclick', () => {
+    el.addEventListener('dblclick', async () => {
       const h = store.state.headings[el.dataset.headingId];
       if (!h) return;
-      const title = prompt('Название раздела:', h.title);
+      const title = await askText({ title: 'Переименовать раздел', value: h.title });
       if (title && title.trim()) store.updateHeading(h.id, { title: title.trim() });
     });
   });
   $$('[data-delete-heading]').forEach(el => {
-    el.addEventListener('click', (e) => {
+    el.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (confirm('Удалить раздел? Задачи останутся в проекте.')) store.deleteHeading(el.dataset.deleteHeading);
+      if (await askConfirm({ title: 'Удалить раздел?', message: 'Задачи останутся в проекте.', confirmLabel: 'Удалить', danger: true })) store.deleteHeading(el.dataset.deleteHeading);
     });
   });
   $$('[data-heading-drop]').forEach(el => {
@@ -353,6 +375,18 @@ function renderMain() {
     setHeader('calendar');
     subEl.textContent = '';
     html = renderCalendarHtml();
+  } else if (currentView.type === 'overdue') {
+    setHeader('overdue');
+    // от старых к свежим: чем дольше задача висит, тем выше должна быть
+    const tasks = store.overdueTasks().sort((a, b) => a.when.localeCompare(b.when));
+    if (!tasks.length) html = emptyMsg('Просроченного нет', '👍');
+    else {
+      let lastDate = null;
+      tasks.forEach(t => {
+        if (t.when !== lastDate) { html += groupHtml(fmtDate(t.when)); lastDate = t.when; }
+        html += taskRowHtml(t, { showProject: true });
+      });
+    }
   } else if (currentView.type === 'upcoming') {
     setHeader('upcoming');
     const tasks = store.upcomingTasks().sort((a, b) => a.when.localeCompare(b.when));
@@ -790,7 +824,13 @@ function bindSwipe(row) {
     if (!tracking || !horizontal) { tracking = false; return; }
     tracking = false;
     const id = row.dataset.id;
-    if (dx <= -SWIPE_TRIGGER) {
+    const task = store.state.tasks[id];
+    const trashed = task?.status === 'trashed';
+    const done = task?.status === 'completed' || task?.status === 'canceled';
+
+    // В корзине смахивать влево некуда — задача уже там. Удаление навсегда
+    // оставлено меню строки: слишком необратимо для мимолётного жеста.
+    if (dx <= -SWIPE_TRIGGER && !trashed) {
       reset(false);
       tapMedium();
       store.trashTask(id);
@@ -798,8 +838,20 @@ function bindSwipe(row) {
       showToast('Задача удалена', () => store.restoreTask(id));
     } else if (dx >= SWIPE_TRIGGER) {
       reset(false);
-      tapSuccess();
-      store.toggleComplete(id);
+      if (trashed) {
+        // toggleComplete здесь ставила удалённой задаче статус «выполнена»,
+        // и она уезжала из корзины в журнал
+        store.restoreTask(id);
+        tapLight();
+        showToast('Задача восстановлена');
+      } else if (done) {
+        store.toggleComplete(id);
+        tapLight();
+        showToast('Возвращена в работу');
+      } else {
+        store.toggleComplete(id);
+        tapSuccess();
+      }
     } else {
       reset(true);
     }
@@ -822,7 +874,7 @@ function dateFieldHtml(id, value, placeholder, icon = '📅') {
 }
 
 // Общая обвязка поля-кнопки: открытие барабана и крестик «очистить».
-function bindDateField(sel, { kind = 'date', title, allowClear = false, clearLabel, onPick }) {
+function bindDateField(sel, { kind = 'date', title, allowClear = false, clearLabel, min, onPick }) {
   const el = $(sel);
   if (!el) return;
   el.addEventListener('click', (e) => {
@@ -832,7 +884,7 @@ function bindDateField(sel, { kind = 'date', title, allowClear = false, clearLab
       return;
     }
     const open = kind === 'time' ? openTimePicker : openDatePicker;
-    open({ value: el.dataset.value || null, title, allowClear, clearLabel, onPick });
+    open({ value: el.dataset.value || null, title, allowClear, clearLabel, onPick, min: min?.() });
   });
 }
 
@@ -1021,6 +1073,14 @@ function renderDetail() {
     title: 'Дедлайн',
     allowClear: true,
     clearLabel: 'Убрать дедлайн',
+    // Срок сдачи не может быть раньше дня, на который задача назначена:
+    // «сделать десятого, сдать до восьмого» — противоречие.
+    min: () => {
+      const t = store.state.tasks[task.id];
+      if (!t) return null;
+      if (isDateStr(t.when)) return t.when;
+      return (t.when === 'today' || t.when === 'evening') ? todayStr() : null;
+    },
     onPick: (d) => store.updateTask(task.id, { deadline: d }),
   });
   bindDateField('#detReminderTime', {
@@ -1069,8 +1129,8 @@ function renderDetail() {
     store.updateTask(task.id, { headingId: e.target.value || null });
   });
   const convertBtn = $('#detConvertProject');
-  if (convertBtn) convertBtn.addEventListener('click', () => {
-    if (confirm('Превратить задачу в проект? Пункты чек-листа станут отдельными задачами нового проекта.')) {
+  if (convertBtn) convertBtn.addEventListener('click', async () => {
+    if (await askConfirm({ title: 'Сделать проектом?', message: 'Пункты чек-листа станут отдельными задачами нового проекта.', confirmLabel: 'Превратить' })) {
       const project = store.convertTaskToProject(task.id);
       selectedTaskId = null;
       currentView = { type: 'project', id: project.id };
@@ -1078,8 +1138,8 @@ function renderDetail() {
     }
   });
 
-  $('#detChecklistAdd').addEventListener('click', () => {
-    const text = prompt('Пункт чек-листа:');
+  $('#detChecklistAdd').addEventListener('click', async () => {
+    const text = await askText({ title: 'Новый пункт', placeholder: 'Что нужно сделать', confirmLabel: 'Добавить' });
     if (text && text.trim()) store.addChecklistItem(task.id, text.trim());
   });
   panel.querySelectorAll('[data-cl-toggle]').forEach(el => {
@@ -1115,8 +1175,8 @@ function renderDetail() {
     }
   });
   const delForever = $('#detDeleteForever');
-  if (delForever) delForever.addEventListener('click', () => {
-    if (confirm('Удалить задачу навсегда? Это действие необратимо.')) {
+  if (delForever) delForever.addEventListener('click', async () => {
+    if (await askConfirm({ title: 'Удалить навсегда?', message: 'Отменить это будет нельзя.', confirmLabel: 'Удалить', danger: true })) {
       store.deleteTaskPermanently(task.id);
       selectedTaskId = null;
       renderAll();
@@ -1463,7 +1523,14 @@ function pickViewForTask(t) {
   if (t.inInbox) return { type: 'inbox' };
   if (t.when === 'today' || t.when === 'evening') return { type: 'today' };
   if (t.when === 'someday') return { type: 'someday' };
-  if (isDateStr(t.when)) return { type: 'upcoming' };
+  if (isDateStr(t.when)) {
+    // «Скоро» — это только будущее. Раньше сюда уходили и прошедшие даты,
+    // и переход из уведомления открывал экран, где задачи заведомо нет.
+    const today = todayStr();
+    if (t.when < today) return { type: 'overdue' };
+    if (t.when === today) return { type: 'today' };
+    return { type: 'upcoming' };
+  }
   return { type: 'anytime' };
 }
 
@@ -1672,6 +1739,12 @@ function fireReminderNotifications() {
 
 // ---------------- Toast / Undo ----------------
 let toastTimer = null;
+// Таймеры в WKWebView замирают вместе с приложением: свернули через секунду
+// после удаления, вернулись через час — подсказка всё ещё висит с недоигранным
+// остатком. Поэтому держим не только таймер, но и срок по часам, и сверяемся
+// с ним при возвращении.
+let toastDeadline = 0;
+
 function showToast(message, onUndo) {
   const toast = $('#toast');
   $('#toastMsg').textContent = message;
@@ -1684,16 +1757,27 @@ function showToast(message, onUndo) {
     $('#toastMsg').textContent = 'Восстановлено';
     $('#toastUndo').style.display = 'none';
     clearTimeout(toastTimer);
+    toastDeadline = Date.now() + 3000;
     toastTimer = setTimeout(hideToast, 3000);
   });
   toast.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(hideToast, 15000);
+  // 8 секунд вместо пятнадцати: вернуть задачу можно и позже, удержанием на
+  // пустом месте списка, так что подсказке незачем стоять так долго
+  toastDeadline = Date.now() + 8000;
+  toastTimer = setTimeout(hideToast, 8000);
 }
 function hideToast() {
   $('#toast').hidden = true;
+  toastDeadline = 0;
   clearTimeout(toastTimer);
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || $('#toast').hidden) return;
+  if (Date.now() >= toastDeadline) hideToast();
+  else { clearTimeout(toastTimer); toastTimer = setTimeout(hideToast, toastDeadline - Date.now()); }
+});
 
 // Удержание на свободном месте списка. Строки обрабатывают жест сами, поэтому
 // касания по ним сюда не доходят.
@@ -1708,8 +1792,8 @@ function bindListLongPress(listEl) {
     cancel();
     timer = setTimeout(() => {
       timer = null;
-      tapMedium();
-      openListMenu(sx, sy);
+      // отдача только если меню открылось — иначе палец получает отклик впустую
+      if (openListMenu(sx, sy)) tapMedium();
     }, 480);
   }, { passive: true });
 
@@ -1865,10 +1949,26 @@ function moveTask(taskId, dir) {
 // вообще — стоишь в «Скоро», а тебе возвращают задачу из «Сегодня».
 function taskFitsView(task, view) {
   const today = todayStr();
+  // Куда задача вернётся, если её восстановить: у лежащей в корзине это
+  // прежний статус, у остальных — нынешний.
+  const target = task.status === 'trashed' ? (task.statusBeforeTrash || 'active') : task.status;
+
+  // В журнале возвращать имеет смысл только удалённое оттуда же: «снять отметку»
+  // там убрало бы задачу с экрана вместо того, чтобы вернуть.
+  if (view.type === 'logbook') {
+    return task.status === 'trashed' && (target === 'completed' || target === 'canceled');
+  }
+  if (view.type === 'trash') return false;
+  // Ограничение касается только корзины: оттуда выполненная задача вернётся
+  // в журнал, а не в открытый список. Просто выполненную снять отметкой можно —
+  // она сразу окажется здесь же.
+  if (task.status === 'trashed' && target !== 'active') return false;
+
   switch (view.type) {
     case 'inbox':    return Boolean(task.inInbox);
     case 'today':    return !task.inInbox && (task.when === 'today' || task.when === 'evening'
-                       || (isDateStr(task.when) && task.when <= today));
+                       || task.when === today);
+    case 'overdue':  return !task.inInbox && isDateStr(task.when) && task.when < today;
     case 'upcoming': return !task.inInbox && isDateStr(task.when) && task.when > today;
     case 'someday':  return !task.inInbox && task.when === 'someday';
     case 'anytime':  return !task.inInbox && !task.when;
@@ -1877,7 +1977,6 @@ function taskFitsView(task, view) {
     case 'project':  return task.projectId === view.id;
     case 'area':     return task.areaId === view.id;
     case 'tag':      return (task.tags || []).includes(view.id);
-    // в журнале и корзине задачи и так на виду: там возврат живёт в меню строки
     default:         return false;
   }
 }
@@ -1885,11 +1984,13 @@ function taskFitsView(task, view) {
 // Меню по удержанию на пустом месте списка. Отдельная кнопка «отменить» жила
 // только в тосте и пропадала через несколько секунд — вернуть случайно закрытую
 // задачу после этого было нечем, кроме похода в корзину или журнал.
+// Это меню — исключительно отмена только что сделанного. Если возвращать нечего,
+// оно не открывается вовсе: пустая шторка на пустом месте и «Новая задача»
+// рядом с кнопкой «+» были шумом, а в журнале и корзине — ещё и бессмыслицей.
 function openListMenu(x, y) {
   const { trashed, completed } = store.lastRemoved(task => taskFitsView(task, currentView));
   const short = (t) => (t.length > 26 ? t.slice(0, 25) + '…' : t);
   const items = [];
-
   if (trashed) {
     items.push({ icon: '↺', label: `Вернуть: ${short(trashed.title)}`, action: () => {
       store.restoreTask(trashed.id);
@@ -1903,11 +2004,61 @@ function openListMenu(x, y) {
       tapLight();
     } });
   }
-  if (items.length) items.push({ sep: true });
-  items.push({ icon: '+', label: 'Новая задача', action: openQuickAdd });
 
+  // Очистка целиком — только там, где она осмысленна. Это необратимо для
+  // корзины, поэтому спрашиваем подтверждение.
+  if (currentView.type === 'logbook') {
+    const n = store.logbookTasks().length;
+    if (n) {
+      if (items.length) items.push({ sep: true });
+      items.push({ icon: '🗑', label: `Очистить журнал (${n})`, danger: true, action: async () => {
+        if (!await askConfirm({ title: `Очистить журнал (${n})?`, message: 'Задачи переедут в корзину — оттуда их ещё можно вернуть.', confirmLabel: 'Очистить' })) return;
+        store.clearLogbook();
+        tapMedium();
+        showToast('Журнал очищен');
+      } });
+    }
+  } else if (currentView.type === 'trash') {
+    const n = store.trashTasks().length;
+    if (n) {
+      items.push({ icon: '⌫', label: `Очистить корзину (${n})`, danger: true, action: async () => {
+        if (!await askConfirm({ title: `Очистить корзину (${n})?`, message: 'Задачи будут удалены навсегда, отменить это будет нельзя.', confirmLabel: 'Удалить', danger: true })) return;
+        store.emptyTrash();
+        if (selectedTaskId && !store.state.tasks[selectedTaskId]) selectedTaskId = null;
+        tapMedium();
+        showToast('Корзина очищена');
+      } });
+    }
+  }
+
+  if (!items.length) return false;
   showMenu(items, x, y);
+  return true;
 }
+
+// ---------------- Смена суток ----------------
+// Всё, что зависит от «сегодня» — списки, просрочка, выделение дня в календаре —
+// вычислялось только при отрисовке. Приложение, оставленное открытым или просто
+// свёрнутым на ночь, наутро показывало вчерашнюю картину: вчерашние задачи не
+// выглядели просроченными, а сегодняшние ещё не переехали на новый день.
+let renderedDay = todayStr();
+
+function refreshIfDayChanged() {
+  const now = todayStr();
+  if (now === renderedDay) return;
+  renderedDay = now;
+  // вчерашние «сегодня» закрепляем за вчерашним числом, а не тащим за собой
+  store.rolloverStaleToday();
+  // выбранный в календаре день тянем за собой, только если он был «сегодня»
+  if (!isDateStr(calendarSelectedDay) || calendarSelectedDay < now) calendarSelectedDay = now;
+  renderAll();
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshIfDayChanged();
+});
+// на случай, если приложение просто лежит открытым и полночь наступает при нас
+setInterval(refreshIfDayChanged, 60000);
 
 // ---------------- Global render ----------------
 function renderAll() {
@@ -1948,6 +2099,8 @@ function seedIfEmpty() {
 
 document.addEventListener('DOMContentLoaded', () => {
   seedIfEmpty();
+  // приложение могло не открываться несколько дней — разбираем накопившееся
+  store.rolloverStaleToday();
   renderAll();
 
   applyTheme(currentTheme());
@@ -2022,12 +2175,12 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (e.key === 'Enter' && e.target.tagName !== 'SELECT') { e.preventDefault(); submitQuickAdd(); }
   });
 
-  $('#btnAddArea').addEventListener('click', () => {
-    const title = prompt('Название области:');
+  $('#btnAddArea').addEventListener('click', async () => {
+    const title = await askText({ title: 'Новая область', placeholder: 'Название области', confirmLabel: 'Создать' });
     if (title && title.trim()) store.createArea({ title: title.trim() });
   });
-  $('#btnAddProject').addEventListener('click', () => {
-    const title = prompt('Название проекта:');
+  $('#btnAddProject').addEventListener('click', async () => {
+    const title = await askText({ title: 'Новый проект', placeholder: 'Название проекта', confirmLabel: 'Создать' });
     if (title && title.trim()) {
       let areaId = currentView.type === 'area' ? currentView.id : null;
       const p = store.createProject({ title: title.trim(), areaId });
@@ -2048,11 +2201,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const parsed = JSON.parse(reader.result);
         if (!parsed || typeof parsed !== 'object' || !parsed.tasks) throw new Error('bad format');
-        if (confirm('Импорт заменит все текущие данные приложения этим файлом. Продолжить?')) {
+        if (await askConfirm({ title: 'Заменить все данные?', message: 'Импорт заменит текущие задачи, проекты и области содержимым файла.', confirmLabel: 'Импортировать', danger: true })) {
           selectedTaskId = null;
           currentView = { type: 'today' };
           store.importState(parsed);

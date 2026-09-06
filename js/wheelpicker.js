@@ -213,7 +213,7 @@ const shiftDays = (dateStr, n) => {
   return fmtDay(dt);
 };
 
-export function openDatePicker({ value, title = 'Дата', allowClear = false, clearLabel = 'Очистить', onPick }) {
+export function openDatePicker({ value, title = 'Дата', allowClear = false, clearLabel = 'Очистить', min = null, onPick }) {
   closePicker();
 
   const today = fmtDay(new Date());
@@ -289,13 +289,18 @@ export function openDatePicker({ value, title = 'Дата', allowClear = false, 
       if (outside) cls.push('outside');
       if (date === today) cls.push('today');
       if (date === selected) cls.push('selected');
-      html += `<button type="button" class="${cls.join(' ')}" data-day="${date}">${label}</button>`;
+      // ниже границы выбирать нечего: дедлайн раньше самой задачи бессмыслен
+      const blocked = min && date < min;
+      if (blocked) cls.push('blocked');
+      html += `<button type="button" class="${cls.join(' ')}" data-day="${date}"${blocked ? ' disabled' : ''}>${label}</button>`;
     }
     gridEl.innerHTML = html;
 
     overlay.querySelectorAll('.cal-sheet-chip').forEach(chip => {
       const target = { today, tomorrow: shiftDays(today, 1), weekend: weekendDate(), week: shiftDays(today, 7) }[chip.dataset.jump];
       chip.classList.toggle('active', target === selected);
+      // быстрый чип, ведущий за границу, тоже недоступен
+      chip.disabled = Boolean(min && target < min);
     });
   }
 
@@ -321,7 +326,7 @@ export function openDatePicker({ value, title = 'Дата', allowClear = false, 
       return render();
     }
 
-    const day = e.target.closest('[data-day]')?.dataset.day;
+    const day = e.target.closest('[data-day]:not([disabled])')?.dataset.day;
     if (day) {
       selected = day;
       // тап по «хвосту» соседнего месяца перелистывает сетку туда же

@@ -35,6 +35,12 @@ function daysBetween(fromStr, toStr) {
 
 const isDateStr = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
 
+// Запоминаем, какой день подразумевался под словом. Для конкретных дат
+// и «когда-нибудь» отметка не нужна — там день уже задан или не задан вовсе.
+function stampWhenDay(task) {
+  task.whenSetOn = (task.when === 'today' || task.when === 'evening') ? todayStr() : null;
+}
+
 function nextRepeatDate(dateStr, repeat) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
@@ -121,6 +127,7 @@ class Store {
       checklist,
       tags,
       when, // null | 'today' | 'evening' | 'someday' | 'YYYY-MM-DD'
+      whenSetOn: null, // какой день имелся в виду под «сегодня»/«вечером»
       deadline, // null | 'YYYY-MM-DD'
       priority, // 0 none | 1 low | 2 medium | 3 high
       repeat, // null | 'daily' | 'weekly' | 'monthly'
@@ -139,6 +146,7 @@ class Store {
       completedAt: null,
       order: now,
     };
+    stampWhenDay(task);
     this.state.tasks[id] = task;
     this.state.order.tasks.push(id);
     this.save();
@@ -149,6 +157,7 @@ class Store {
     const t = this.state.tasks[id];
     if (!t) return;
     Object.assign(t, patch);
+    if (patch.when !== undefined) stampWhenDay(t);
     // clear inbox flag once organized
     if (patch.projectId !== undefined || patch.areaId !== undefined || patch.when !== undefined) {
       if (t.projectId || t.areaId || t.when) t.inInbox = false;
@@ -273,6 +282,10 @@ class Store {
   trashTask(id) {
     const t = this.state.tasks[id];
     if (!t) return;
+    // Запоминаем, откуда задача попала в корзину. Без этого выполненная задача,
+    // удалённая из журнала, возвращалась живой: статус затирался, и восстановление
+    // всегда делало её активной — с датой выполнения, но снова в работе.
+    if (t.status !== 'trashed') t.statusBeforeTrash = t.status;
     t.status = 'trashed';
     // время удаления нужно, чтобы находить последнюю выброшенную задачу:
     // порядок в корзине по нему, а не по дате создания
@@ -283,7 +296,9 @@ class Store {
   restoreTask(id) {
     const t = this.state.tasks[id];
     if (!t) return;
-    t.status = 'active';
+    // возвращаем ровно туда, откуда взяли: выполненная — в журнал, живая — в списки
+    t.status = t.statusBeforeTrash || 'active';
+    t.statusBeforeTrash = null;
     t.trashedAt = null;
     this.save();
   }
@@ -339,6 +354,57 @@ class Store {
       arr.push(id);
     }
     this.save();
+  }
+
+  // «Сегодня» — это конкретный день, а не вечное свойство задачи. Пока слово
+  // хранилось само по себе, задача переезжала вместе с календарём и не могла
+  // стать просроченной в принципе. Наутро превращаем её в задачу с той датой,
+  // которая тогда и подразумевалась, — дальше она живёт как обычная просроченная.
+  rolloverStaleToday() {
+    const today = todayStr();
+    let moved = 0;
+    Object.values(this.state.tasks).forEach(t => {
+      if (t.status !== 'active') return;
+      if (t.when !== 'today' && t.when !== 'evening') return;
+      // У задач, созданных до появления отметки, её нет. Лучшее приближение —
+      // день создания: задача, заведённая шестого с пометкой «сегодня», шестым
+      // числом и была. Дальше отметка ставится точно, при каждом изменении.
+      if (!t.whenSetOn) t.whenSetOn = formatDate(new Date(t.createdAt || Date.now()));
+      if (t.whenSetOn >= today) return;
+      t.when = t.whenSetOn;
+      t.whenSetOn = null;
+      // напоминание должно сработать заново на новом месте
+      t.notifiedOn = null;
+      t.leadNotifiedOn = null;
+      moved++;
+    });
+    if (moved) this.save();
+    return moved;
+  }
+
+  // Пакетные действия для журнала и корзины. Журнал чистим в корзину, а не
+  // насовсем: выполненные задачи — это история, и стирать её одним касанием
+  // без пути назад слишком резко. Корзина же и есть последний рубеж.
+  clearLogbook() {
+    const now = Date.now();
+    let n = 0;
+    Object.values(this.state.tasks).forEach(t => {
+      if (t.status !== 'completed' && t.status !== 'canceled') return;
+      t.statusBeforeTrash = t.status;
+      t.status = 'trashed';
+      t.trashedAt = now;
+      n++;
+    });
+    if (n) this.save();
+    return n;
+  }
+
+  emptyTrash() {
+    const ids = Object.values(this.state.tasks).filter(t => t.status === 'trashed').map(t => t.id);
+    ids.forEach(id => { delete this.state.tasks[id]; });
+    this.state.order.tasks = this.state.order.tasks.filter(id => !ids.includes(id));
+    if (ids.length) this.save();
+    return ids.length;
   }
 
   addChecklistItem(taskId, text) {
@@ -530,9 +596,19 @@ class Store {
     return this.orderedTasks(this.allActiveTasks().filter(t => {
       if (t.inInbox) return false;
       if (t.when === 'today' || t.when === 'evening') return true;
-      if (isDateStr(t.when) && t.when <= today) return true;
+      // Просрочка живёт на своём дне, а не сваливается сюда: иначе «Сегодня»
+      // превращается в свалку всего несделанного и перестаёт быть планом на день.
+      if (t.when === today) return true;
       return false;
     }));
+  }
+
+  // Задачи прошедших дней. Сегодняшние сюда не берём: у них своё место
+  // в «Сегодня», в группе «Просрочено», и дублировать их незачем.
+  overdueTasks() {
+    const today = todayStr();
+    return this.orderedTasks(this.allActiveTasks().filter(t =>
+      !t.inInbox && isDateStr(t.when) && t.when < today));
   }
 
   upcomingTasks() {

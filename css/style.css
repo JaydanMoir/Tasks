@@ -2196,3 +2196,101 @@ html { touch-action: manipulation; }
 @media (max-width: 700px) {
   .header-search-btn { width: 40px; height: 40px; }
 }
+
+/* ==================== Выделение текста ====================
+   Долгое нажатие на свободном месте списка цепляло случайное слово: заголовок
+   группы, дату, подпись пустого состояния — и iOS показывала своё меню поверх
+   нашего. Приложение состоит из элементов управления, а не из текста для
+   копирования, поэтому выделение выключено целиком и включено обратно только
+   там, где действительно вводят текст. */
+#app {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+#app input,
+#app textarea,
+#app [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* Свайп вправо у закрытой задачи возвращает её, а не выполняет — зелёный
+   «сделано» здесь вводил бы в заблуждение. */
+.task-swipe.restore .swipe-bg-done,
+.task-swipe.no-trash .swipe-bg-done { background: var(--accent); }
+/* В корзине смахивать влево некуда: задача уже удалена. */
+.task-swipe.no-trash .swipe-bg-trash { display: none; }
+
+/* Просроченный дедлайн выделяем, обычный — спокойный: иначе любой срок сдачи
+   выглядит тревогой, и настоящая просрочка теряется среди них. */
+.deadline-pill { background: var(--tag-bg); color: var(--tag-text); }
+.deadline-pill.late { background: rgba(224, 71, 62, 0.14); color: var(--danger); font-weight: 600; }
+
+/* ==================== Свои диалоги ====================
+   Замена системным prompt() и confirm(): у тех кнопки подписаны по-английски
+   и рисуются средствами системы, никак не поддаваясь оформлению. */
+
+.dialog-overlay { align-items: center; padding-top: 0; }
+.dialog {
+  width: min(340px, calc(100vw - 48px));
+  padding: 20px 18px 14px;
+  text-align: center;
+}
+.dialog-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+.dialog-message {
+  margin-top: 6px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+.dialog-input {
+  width: 100%;
+  margin-top: 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--field-fill);
+  color: var(--text-primary);
+  font-family: inherit;
+  /* 16px — ниже этого WebKit зумит страницу при фокусе */
+  font-size: 16px;
+  outline: none;
+}
+.dialog-input:focus { border-color: var(--accent); }
+
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+.dialog-btn {
+  flex: 1;
+  min-height: 44px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--field-fill);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 15.5px;
+  cursor: pointer;
+}
+.dialog-btn.strong { background: var(--accent); color: #fff; font-weight: 600; }
+.dialog-btn.strong.danger { background: var(--danger); }
+.dialog-btn:active { transform: scale(0.97); }
+
+/* День ниже допустимой границы: виден, но недоступен — так понятнее, чем
+   если бы он просто исчез из сетки. */
+.cal-sheet-day.blocked {
+  color: var(--text-tertiary);
+  opacity: 0.35;
+  cursor: default;
+}
+.cal-sheet-day.blocked:hover { background: none; }
+.cal-sheet-chip:disabled { opacity: 0.4; cursor: default; }
