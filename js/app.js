@@ -222,7 +222,12 @@ function renderSidebar() {
 
 // ---------------- Task row ----------------
 function taskRowHtml(task, opts = {}) {
-  const { showProject = false } = opts;
+  // forDate — день календаря, в списке которого строка показывается. Задача
+  // попадает туда либо потому, что на этот день назначена, либо потому, что
+  // на него приходится срок сдачи; это разные поводы, и выглядеть они должны
+  // по-разному.
+  const { showProject = false, forDate = null } = opts;
+  const byDeadline = forDate && task.deadline === forDate && task.when !== forDate;
   const tags = (task.tags || []).map(id => store.state.tags[id]).filter(Boolean);
   const checklistDone = task.checklist.filter(c => c.completed).length;
   const project = task.projectId ? store.state.projects[task.projectId] : null;
@@ -237,14 +242,20 @@ function taskRowHtml(task, opts = {}) {
   // Флажок и «до» обязательны: голая дата в красной плашке читалась как дата
   // самой задачи, и задача на сегодня со вчерашним дедлайном выглядела так,
   // будто она вчерашняя и почему-то попала в сегодняшний список.
-  if (task.deadline) {
+  if (byDeadline) {
+    // на дне самого срока писать «до этого же числа» незачем — говорим, что это он
+    metaBits.push(`<span class="deadline-pill">🏁 срок сдачи</span>`);
+    if (isDateStr(task.when)) metaBits.push(`<span class="task-meta-item">назначена ${fmtDate(task.when)}</span>`);
+  } else if (task.deadline) {
     const late = isOverdue(task.deadline) ? ' late' : '';
     metaBits.push(`<span class="deadline-pill${late}">🏁 до ${fmtDate(task.deadline)}</span>`);
   }
   if (task.when === 'evening') metaBits.push(`<span class="task-meta-item">🌙 вечер</span>`);
   if (task.reminderTime) metaBits.push(`<span class="task-meta-item" title="${task.reminderLeadMinutes ? 'Предупредит за ' + formatLead(task.reminderLeadMinutes) + '. ' : ''}${task.reminderRepeatMinutes ? 'Повторяется каждые ' + task.reminderRepeatMinutes + ' мин.' : 'Однократное напоминание'}">⏰ ${task.reminderTime}${task.reminderRepeatMinutes ? ' ⟳' : ''}</span>`);
   if (task.repeat) metaBits.push(`<span class="task-meta-item" title="Повторяется">🔁</span>`);
-  if (isTaskOverdue(task)) metaBits.push(`<span class="deadline-pill late">просрочено</span>`);
+  // «Просрочено» относится к дню, на который задача назначена. На дне её срока
+  // сдачи, ещё не наступившем, эта метка выглядела бы бессмыслицей.
+  if (!byDeadline && isTaskOverdue(task)) metaBits.push(`<span class="deadline-pill late">просрочено</span>`);
 
   const cls = ['task-row'];
   if (task.status === 'completed') cls.push('completed');
@@ -627,7 +638,7 @@ function renderCalendarHtml() {
     const tasks = store.tasksOnDate(calendarSelectedDay);
     dayListHtml = `<div class="cal-daylist">
       <div class="group-heading">${fmtDate(calendarSelectedDay)}</div>
-      ${tasks.length ? tasks.map(t => taskRowHtml(t, { showProject: true })).join('') : `<div class="empty-state" style="margin-top:16px;">Нет задач на этот день</div>`}
+      ${tasks.length ? tasks.map(t => taskRowHtml(t, { showProject: true, forDate: calendarSelectedDay })).join('') : `<div class="empty-state" style="margin-top:16px;">Нет задач на этот день</div>`}
     </div>`;
   }
 
