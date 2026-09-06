@@ -1952,3 +1952,6 @@ select.detail-select {
    пользователя, а помеха: тапнул дважды по задаче — экран уехал.
    manipulation отключает именно двойной тап, оставляя прокрутку и щипок. */
 html { touch-action: manipulation; }
+
+.parse-chip.lead { background: rgba(63,174,90,0.16); color: #2f8f47; }
+@media (prefers-color-scheme: dark) { .parse-chip.lead { color: #6ec982; } }

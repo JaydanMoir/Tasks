@@ -51,7 +51,7 @@ function dateFromDayMonth(day, month) {
 }
 
 export function parseQuickInput(raw) {
-  const out = { title: '', when: null, time: null, priority: 0, tags: [], hits: [] };
+  const out = { title: '', when: null, time: null, lead: null, priority: 0, tags: [], hits: [] };
   if (!raw) return out;
   let text = raw;
 
@@ -89,6 +89,26 @@ export function parseQuickInput(raw) {
     if (!part && h > 23) return null;
     return `${String(h).padStart(2, '0')}:00`;
   }, 'time');
+
+  // ---- предварительное напоминание: «напомнить за 15 минут», «за полчаса» ----
+  // Смысл есть только при заданном времени: «за 15 минут» до чего-то, чего нет,
+  // ничего не значит. Без этой проверки «сделать за 20 минут» — про длительность
+  // работы, а не про напоминание — превращалось бы в будильник.
+  const asLead = (n, unit) => {
+    const minutes = /^час/i.test(unit) ? n * 60 : n;
+    return minutes > 0 && minutes <= 24 * 60 ? minutes : null;
+  };
+  const hasTime = () => out.hits.some(h => h.kind === 'time');
+
+  apply(`(?:напомн${RU}*|предупред${RU}*)\\s+(?:за\\s+)?(\\d{1,3})\\s*(мин${RU}*|час${RU}*)`,
+    m => (hasTime() ? asLead(Number(m[2]), m[3]) : null), 'lead');
+  apply(`(?:напомн${RU}*\\s+)?за\\s+(\\d{1,3})\\s*(мин${RU}*|час${RU}*)`,
+    m => (hasTime() ? asLead(Number(m[2]), m[3]) : null), 'lead');
+  // «за час» и «за полчаса» — без числа
+  apply(`(?:напомн${RU}*\\s+)?за\\s+(полчаса|час)`,
+    m => (hasTime() ? (/^полчаса/i.test(m[2]) ? 30 : 60) : null), 'lead');
+  // одинокое «напомнить» без отступа — просто убираем из названия
+  apply(`напомн${RU}*`, () => (hasTime() ? 0 : null), 'reminderword');
 
   // ---- дата ----
   apply('послезавтра', () => addDays(todayStr(), 2), 'when');
@@ -143,6 +163,7 @@ export function parseQuickInput(raw) {
   out.when = out.hits.find(h => h.kind === 'when')?.value ?? null;
   out.time = out.hits.find(h => h.kind === 'time')?.value ?? null;
   out.priority = out.hits.find(h => h.kind === 'priority')?.value ?? 0;
+  out.lead = out.hits.find(h => h.kind === 'lead')?.value ?? null;
   return out;
 }
 

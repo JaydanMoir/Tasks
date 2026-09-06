@@ -880,7 +880,7 @@ function renderDetail() {
         ${dateFieldHtml('detReminderTime', task.reminderTime, 'Без напоминания', '⏰')}
         <select class="detail-select" id="detReminderLead" style="margin-top:6px; ${task.reminderTime ? '' : 'display:none'}">
           <option value="" ${!task.reminderLeadMinutes ? 'selected' : ''}>Не напоминать заранее</option>
-          ${LEAD_OPTIONS.map(o => `<option value="${o.value}" ${task.reminderLeadMinutes === o.value ? 'selected' : ''}>Напомнить за ${o.label}</option>`).join('')}
+          ${leadOptionsFor(task.reminderLeadMinutes).map(o => `<option value="${o.value}" ${task.reminderLeadMinutes === o.value ? 'selected' : ''}>Напомнить за ${o.label}</option>`).join('')}
         </select>
         <select class="detail-select" id="detReminderRepeat" style="margin-top:6px; ${task.reminderTime ? '' : 'display:none'}">
           <option value="" ${!task.reminderRepeatMinutes ? 'selected' : ''}>Не повторять</option>
@@ -1125,6 +1125,17 @@ function commitInlineEdit() {
   renderMain();
 }
 
+// Готовые варианты плюс уже сохранённый у задачи, если он из них выпадает —
+// иначе продиктованное «за 20 минут» пропадало бы при открытии карточки.
+function leadOptionsFor(value) {
+  const opts = LEAD_OPTIONS.slice();
+  if (value && !opts.some(o => o.value === value)) {
+    opts.push({ value, label: formatLead(value) });
+    opts.sort((a, b) => a.value - b.value);
+  }
+  return opts;
+}
+
 // ---------------- Quick Add ----------------
 
 // Клавиатура на iOS не сжимает раскладочный вьюпорт: окно быстрого добавления
@@ -1276,10 +1287,22 @@ function renderQuickAddParse() {
   // «Напомнить за» имеет смысл только при заданном времени — иначе не от чего отсчитывать
   const leadSel = $('#quickAddLead');
   leadSel.hidden = !quickAddParsed.time;
-  if (quickAddParsed.time && !leadSel.dataset.filled) {
-    leadSel.innerHTML = `<option value="">Не напоминать заранее</option>` +
-      LEAD_OPTIONS.map(o => `<option value="${o.value}">Напомнить за ${o.label}</option>`).join('');
-    leadSel.dataset.filled = '1';
+  if (quickAddParsed.time) {
+    // Сказанное вслух не обязано совпадать с готовыми вариантами: «за 20 минут»
+    // такого пункта не имеет. Добавляем распознанное значение отдельным пунктом,
+    // вместо того чтобы молча округлить его до ближайшего.
+    const opts = LEAD_OPTIONS.slice();
+    if (quickAddParsed.lead && !opts.some(o => o.value === quickAddParsed.lead)) {
+      opts.push({ value: quickAddParsed.lead, label: formatLead(quickAddParsed.lead) });
+      opts.sort((a, b) => a.value - b.value);
+    }
+    const signature = String(quickAddParsed.lead || '');
+    if (leadSel.dataset.filled !== signature) {
+      leadSel.innerHTML = `<option value="">Не напоминать заранее</option>` +
+        opts.map(o => `<option value="${o.value}">Напомнить за ${o.label}</option>`).join('');
+      leadSel.dataset.filled = signature;
+      leadSel.value = quickAddParsed.lead ? String(quickAddParsed.lead) : '';
+    }
   }
 
   const chips = [];
@@ -1287,6 +1310,7 @@ function renderQuickAddParse() {
     chips.push(`<span class="parse-chip when">📅 ${esc(describeWhen(quickAddParsed.when))}</span>`);
   }
   if (quickAddParsed.time) chips.push(`<span class="parse-chip time">⏰ ${esc(quickAddParsed.time)}</span>`);
+  if (quickAddParsed.lead) chips.push(`<span class="parse-chip lead">🔔 за ${esc(formatLead(quickAddParsed.lead))}</span>`);
   if (quickAddParsed.priority) {
     const names = { 1: 'Низкий', 2: 'Средний', 3: 'Высокий' };
     chips.push(`<span class="parse-chip p${quickAddParsed.priority}">❗ ${names[quickAddParsed.priority]}</span>`);
@@ -1381,7 +1405,9 @@ function submitQuickAdd() {
     when, projectId, areaId, tags,
     priority: parsed.priority,
     reminderTime: parsed.time,
-    reminderLeadMinutes: parsed.time && $('#quickAddLead').value ? Number($('#quickAddLead').value) : null,
+    reminderLeadMinutes: parsed.time
+      ? (Number($('#quickAddLead').value) || parsed.lead || null)
+      : null,
   });
   closeQuickAdd();
   tapLight();
