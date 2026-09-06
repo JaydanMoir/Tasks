@@ -1,5 +1,8 @@
 const STORAGE_KEY = 'tasksApp.v1';
 
+// Сколько времени задача считается «только что убранной» и предлагается к возврату
+const LAST_REMOVED_WINDOW_MS = 15 * 60 * 1000;
+
 function uid() {
   return (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2));
 }
@@ -288,12 +291,18 @@ class Store {
   // Последнее, что пользователь убрал с глаз: удалил или отметил выполненным.
   // Нужно для возврата случайно закрытой задачи из меню пустого места списка.
   lastRemoved(fits = () => true) {
+    // Это отмена только что сделанного, а не разбор архива: без окна меню
+    // предлагало снять отметку с задачи, закрытой неделю назад.
+    const since = Date.now() - LAST_REMOVED_WINDOW_MS;
     let trashed = null, completed = null;
     Object.values(this.state.tasks).forEach(t => {
       if (!fits(t)) return;
-      if (t.status === 'trashed' && t.trashedAt) {
+      if (t.status === 'trashed' && t.trashedAt > since) {
         if (!trashed || t.trashedAt > trashed.trashedAt) trashed = t;
-      } else if (t.status === 'completed' && t.completedAt) {
+      } else if (t.status === 'completed' && t.completedAt > since) {
+        // Выполнение повторяющейся задачи — не удаление, а переход к следующему
+        // вхождению: оно уже стоит в списке, и снятие отметки его уничтожит.
+        if (t.spawnedTaskId) return;
         if (!completed || t.completedAt > completed.completedAt) completed = t;
       }
     });
@@ -543,9 +552,14 @@ class Store {
   }
 
   tasksByDate() {
+    const today = todayStr();
     const map = {};
     this.allActiveTasks().forEach(t => {
       if (isDateStr(t.when)) (map[t.when] ||= []).push(t);
+      // «Сегодня» и «Этим вечером» — это тоже сегодняшнее число, просто хранится
+      // словом. Без этой строки счётчик в календаре показывал одну задачу там,
+      // где список под ним показывал шесть: он-то считает по tasksOnDate().
+      else if (t.when === 'today' || t.when === 'evening') (map[today] ||= []).push(t);
     });
     return map;
   }

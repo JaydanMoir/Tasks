@@ -46,6 +46,19 @@ function isOverdue(dateStr) {
   return isDateStr(dateStr) && dateStr < todayStr();
 }
 
+// Просрочка не только по дате: у задачи на сегодня время напоминания тоже
+// могло пройти. Раньше задача на 10:00 в полдень выглядела как обычная
+// сегодняшняя — единственный признак опоздания подсказывали часы на телефоне.
+function isTaskOverdue(task) {
+  if (isOverdue(task.when)) return true;
+  const today = todayStr();
+  const onToday = task.when === 'today' || task.when === 'evening' || task.when === today;
+  if (!onToday || !task.reminderTime) return false;
+  const now = new Date();
+  const nowHM = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+  return task.reminderTime < nowHM;
+}
+
 // Переименование проекта/области идёт через contentEditable на <h1>, а не через <input>.
 // Без этой проверки Backspace во время переименования отправлял выбранную задачу в корзину.
 function isTypingTarget(el) {
@@ -216,7 +229,7 @@ function taskRowHtml(task, opts = {}) {
   if (task.when === 'evening') metaBits.push(`<span class="task-meta-item">🌙 вечер</span>`);
   if (task.reminderTime) metaBits.push(`<span class="task-meta-item" title="${task.reminderLeadMinutes ? 'Предупредит за ' + formatLead(task.reminderLeadMinutes) + '. ' : ''}${task.reminderRepeatMinutes ? 'Повторяется каждые ' + task.reminderRepeatMinutes + ' мин.' : 'Однократное напоминание'}">⏰ ${task.reminderTime}${task.reminderRepeatMinutes ? ' ⟳' : ''}</span>`);
   if (task.repeat) metaBits.push(`<span class="task-meta-item" title="Повторяется">🔁</span>`);
-  if (isOverdue(task.when)) metaBits.push(`<span class="deadline-pill">просрочено</span>`);
+  if (isTaskOverdue(task)) metaBits.push(`<span class="deadline-pill">просрочено</span>`);
 
   const cls = ['task-row'];
   if (task.status === 'completed') cls.push('completed');
@@ -326,9 +339,10 @@ function renderMain() {
   } else if (currentView.type === 'today') {
     setHeader('today', dateStr);
     const all = store.todayTasks();
-    const overdue = all.filter(t => isOverdue(t.when));
-    const today = all.filter(t => t.when !== 'evening' && !isOverdue(t.when));
-    const evening = all.filter(t => t.when === 'evening');
+    const overdue = all.filter(isTaskOverdue);
+    // просроченные исключаем из обеих групп, иначе задача покажется дважды
+    const today = all.filter(t => t.when !== 'evening' && !isTaskOverdue(t));
+    const evening = all.filter(t => t.when === 'evening' && !isTaskOverdue(t));
     if (!all.length) html = emptyMsg('На сегодня ничего не запланировано', '☀️');
     else {
       if (overdue.length) html += groupHtml('Просрочено') + overdue.map(t => taskRowHtml(t, { showProject: true })).join('');
