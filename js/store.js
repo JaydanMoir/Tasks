@@ -603,5 +603,22 @@ class Store {
   }
 }
 
+// Варианты предварительного напоминания. По умолчанию его нет — задача пингует
+// ровно в назначенное время. Живут здесь, а не в UI: подпись нужна и планировщику
+// нативных уведомлений, который про DOM ничего не знает.
+export const LEAD_OPTIONS = [
+  { value: 5, label: '5 минут' },
+  { value: 10, label: '10 минут' },
+  { value: 15, label: '15 минут' },
+  { value: 30, label: '30 минут' },
+  { value: 60, label: '1 час' },
+  { value: 120, label: '2 часа' },
+  { value: 180, label: '3 часа' },
+];
+
+export function formatLead(min) {
+  return LEAD_OPTIONS.find(o => o.value === min)?.label || `${min} мин.`;
+}
+
 export const store = new Store();
 export { uid, todayStr, formatDate, addDays, daysBetween, nextRepeatDate, isDateStr, STORAGE_KEY };

@@ -1,0 +1,8 @@
+{
+  "appId": "com.alexeika.tasks",
+  "appName": "Задачи",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never"
+  }
+}

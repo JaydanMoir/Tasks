@@ -681,6 +681,9 @@ select.detail-select {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* без этого колонка 1fr не ужимается ниже своего содержимого: длинное
+     название задачи распирало столбец, и сетка уезжала за край экрана */
+  min-width: 0;
 }
 .cal-cell:hover { background: var(--row-hover); }
 .cal-cell.cal-outside { opacity: 0.4; }
@@ -694,7 +697,7 @@ select.detail-select {
   border-radius: 50%;
 }
 .cal-cell.cal-today .cal-daynum { background: var(--accent); color: white; }
-.cal-events { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+.cal-events { display: flex; flex-direction: column; gap: 2px; overflow: hidden; min-width: 0; }
 .cal-event {
   font-size: 10px;
   padding: 1.5px 5px;
@@ -711,7 +714,61 @@ select.detail-select {
 .cal-event.cal-event-done { text-decoration: line-through; opacity: 0.5; }
 .cal-more { font-size: 9.5px; color: var(--text-tertiary); padding-left: 4px; }
 
+.cal-dots { display: none; gap: 4px; height: 6px; align-items: center; justify-content: center; }
+.cal-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--flag, var(--accent-upcoming)); }
+
 .cal-daylist { margin-top: 18px; }
+
+/* ---- Календарь на телефоне ---- */
+/* Настольный вид — это таблица с названиями задач в клетках. В ячейку шириной
+   в полсотни пикселей текст не помещается, поэтому здесь другой вид: компактная
+   сетка чисел с точками-индикаторами, а сами задачи — в списке под ней. */
+@media (max-width: 700px) {
+  /* прыжок на год вперёд-назад с телефона не нужен, место дороже */
+  #calPrevYear, #calNextYear { display: none; }
+  .cal-toolbar {
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 5px;
+    padding: 0 0 12px;
+  }
+  .cal-nav-btn { padding: 7px 11px; font-size: 15px; }
+  .cal-select { padding: 7px 4px; font-size: 13.5px; }
+  .cal-today-btn { margin-left: auto; font-size: 13px; padding: 7px 11px; }
+
+  /* убираем «табличную» рамку: клетки-квадраты на чистом фоне */
+  .cal-grid {
+    gap: 2px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+  }
+  .cal-weekday { background: transparent; padding: 2px 0 8px; font-size: 11px; }
+  .cal-cell {
+    min-height: 0;
+    aspect-ratio: 1 / 1.05;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 2px;
+    border-radius: 10px;
+  }
+  .cal-events { display: none; }
+  .cal-dots { display: flex; }
+
+  .cal-daynum { width: 32px; height: 32px; font-size: 15px; font-weight: 500; }
+  /* выделение переносим с клетки на число: залитый прямоугольник во всю ячейку
+     выглядит тяжело и спорит с кружком «сегодня» */
+  .cal-cell.cal-selected { background: transparent; }
+  .cal-cell.cal-selected .cal-daynum { background: var(--row-selected); font-weight: 700; }
+  .cal-cell.cal-today .cal-daynum { background: var(--accent); color: #fff; font-weight: 700; }
+  /* сегодня и выбрано одновременно — кружок в кольце, иначе состояния неразличимы */
+  .cal-cell.cal-today.cal-selected .cal-daynum {
+    box-shadow: 0 0 0 2px var(--bg-main), 0 0 0 4px var(--accent);
+  }
+
+  .cal-daylist { margin-top: 20px; }
+}
 
 /* drag */
 .task-row.dragging { opacity: 0.4; }
@@ -1175,6 +1232,59 @@ body.picker-open { overflow: hidden; }
   .quick-add-hint { display: none; }   /* на телефоне место дороже подсказки */
 }
 
+/* ==================== Голосовой ввод задачи ==================== */
+
+.quick-add-title-row { display: flex; align-items: center; gap: 6px; }
+/* в флексе поле обязано ужиматься, иначе width:100% выталкивает микрофон за модалку */
+.quick-add-title-row #quickAddTitle { flex: 1; min-width: 0; }
+
+.mic-btn {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-main);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.mic-btn[hidden] { display: none; }
+.mic-btn:hover { border-color: var(--accent); color: var(--accent); }
+.mic-btn.recording {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  animation: mic-pulse 1.4s ease-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(224,71,62,0.45); }
+  100% { box-shadow: 0 0 0 10px rgba(224,71,62,0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mic-btn.recording { animation: none; }
+}
+
+.voice-status {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  padding-top: 6px;
+  line-height: 1.4;
+}
+.voice-status[hidden] { display: none; }
+.voice-status.error { color: var(--danger); }
+
+/* на телефоне кнопка должна попадать под палец */
+@media (max-width: 640px) {
+  .mic-btn { width: 40px; height: 40px; }
+  .voice-status { font-size: 12.5px; }
+}
+
 /* ==================== Свайпы по строке задачи ==================== */
 
 .task-swipe {
@@ -1233,3 +1343,60 @@ body.picker-open { overflow: hidden; }
 }
 .quick-add-lead[hidden] { display: none; }
 @media (max-width: 640px) { .quick-add-lead { min-height: 40px; font-size: 14px; } }
+
+/* ==================== Телефон: укрупнённая шкала ====================
+   Базовые размеры рассчитаны на курсор и настольный экран. На телефоне их
+   не хватает: читать мелко, а попадать пальцем в цель высотой 24px неудобно.
+   Блок идёт последним, чтобы перебивать ранее объявленные мобильные правила. */
+
+@media (max-width: 700px) {
+  /* --- заголовок экрана --- */
+  .main-header h1 { font-size: 28px; letter-spacing: -0.02em; }
+  .main-header-sub { font-size: 14px; }
+  .main-icon { width: 30px; height: 30px; border-radius: 8px; }
+  .menu-btn { width: 40px; height: 40px; }
+
+  /* --- список задач --- */
+  .group-heading { font-size: 13px; margin: 22px 14px 6px; }
+  .task-row { gap: 12px; padding: 12px 14px; border-radius: 10px; }
+  .task-title { font-size: 17px; line-height: 1.35; }
+  .task-meta { gap: 8px; margin-top: 5px; }
+  .task-meta-item, .task-project-label { font-size: 13.5px; }
+  .tag-pill { font-size: 12px; padding: 3px 9px; border-radius: 10px; }
+  .checkbox { width: 22px; height: 22px; border-width: 2px; margin-top: 1px; }
+  /* цветная полоска приоритета — толще, иначе на плотном экране её не видно */
+  .task-row[data-priority="1"] { box-shadow: inset 4px 0 0 var(--accent); }
+  .task-row[data-priority="2"] { box-shadow: inset 4px 0 0 #d9822b; }
+  .task-row[data-priority="3"] { box-shadow: inset 4px 0 0 var(--danger); }
+
+  /* --- боковое меню --- */
+  .nav-item, .tree-item { font-size: 16px; padding: 11px 10px; gap: 10px; border-radius: 8px; }
+  .quick-add-btn { font-size: 15px; padding: 11px 12px; }
+  .sidebar-add-btn { font-size: 14px; padding: 9px 8px; }
+
+  /* --- карточка задачи --- */
+  .detail-panel { padding: 16px; }
+  .detail-title-input { font-size: 22px; line-height: 1.3; }
+  /* 16px — не вкусовщина: при меньшем размере WebKit зумит страницу,
+     как только поле получает фокус, и вёрстка «прыгает» */
+  .detail-notes-input { font-size: 16px; min-height: 64px; }
+  .detail-label { font-size: 12px; margin-bottom: 8px; }
+  .detail-section { margin-bottom: 20px; }
+  select.detail-select { font-size: 16px; padding: 10px 10px; border-radius: 8px; }
+  .priority-opt { font-size: 14px; padding: 8px 15px; border-radius: 11px; }
+  .checklist-item { padding: 7px 0; gap: 10px; }
+  .checklist-item input[type=text] { font-size: 16px; }
+  .checklist-add-btn { font-size: 15px; padding: 8px 0; }
+  .detail-close-btn { width: 40px; height: 40px; font-size: 17px; }
+
+  /* --- быстрое добавление --- */
+  #quickAddTitle { font-size: 18px; }
+  #quickAddNotes { font-size: 16px; }
+  .quick-add-row select { font-size: 16px; }
+  .quick-add-row button { font-size: 16px; padding: 11px 18px; }
+  .parse-chip { font-size: 13px; padding: 4px 10px; border-radius: 11px; }
+
+  /* --- поиск и палитра --- */
+  #searchInput { font-size: 16px; }
+  #paletteInput { font-size: 17px; }
+}

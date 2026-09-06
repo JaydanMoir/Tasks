@@ -1,6 +1,9 @@
-import { store, todayStr, addDays, formatDate, isDateStr } from './store.js?v=13';
-import { openDatePicker, openTimePicker, closePicker, isPickerOpen } from './wheelpicker.js?v=13';
-import { parseQuickInput, describeWhen } from './nlp.js?v=13';
+import { store, todayStr, addDays, formatDate, isDateStr, LEAD_OPTIONS, formatLead } from './store.js?v=15';
+import { openDatePicker, openTimePicker, closePicker, isPickerOpen } from './wheelpicker.js?v=15';
+import { parseQuickInput, describeWhen } from './nlp.js?v=15';
+import { createVoiceInput, speechSupported } from './voice.js?v=15';
+import { isNativeApp, initNativeNotifications, requestPermission as requestNativeNotifPermission, hasPermission as hasNativeNotifPermission, scheduleSyncSoon } from './notifications.js?v=15';
+import { bindDetailBackSwipe, bindSidebarSwipe, EDGE_ZONE } from './edgeswipe.js?v=15';
 
 // ---------------- UI state (not persisted) ----------------
 let currentView = { type: 'today' };
@@ -39,22 +42,6 @@ function fmtDate(dateStr) {
 
 function isOverdue(dateStr) {
   return isDateStr(dateStr) && dateStr < todayStr();
-}
-
-// Варианты предварительного напоминания. По умолчанию его нет — задача пингует
-// ровно в назначенное время, как и раньше.
-const LEAD_OPTIONS = [
-  { value: 5, label: '5 минут' },
-  { value: 10, label: '10 минут' },
-  { value: 15, label: '15 минут' },
-  { value: 30, label: '30 минут' },
-  { value: 60, label: '1 час' },
-  { value: 120, label: '2 часа' },
-  { value: 180, label: '3 часа' },
-];
-
-function formatLead(min) {
-  return LEAD_OPTIONS.find(o => o.value === min)?.label || `${min} мин.`;
 }
 
 // Переименование проекта/области идёт через contentEditable на <h1>, а не через <input>.
@@ -574,6 +561,12 @@ function renderCalendarHtml() {
         ${shown.map(t => `<div class="cal-event ${t.status === 'completed' ? 'cal-event-done' : ''}" data-cal-task="${t.id}" style="--flag:${priorityColor(t.priority)}">${esc(t.title)}</div>`).join('')}
         ${more > 0 ? `<div class="cal-more">+${more}</div>` : ''}
       </div>
+      <!-- На телефоне названия в ячейку не помещаются — там вместо них точки.
+           Рисуем оба варианта и переключаем в CSS: иначе вид зависел бы от
+           ширины на момент отрисовки и ломался при повороте экрана. -->
+      <div class="cal-dots" aria-hidden="true">
+        ${shown.map(t => `<span class="cal-dot" style="--flag:${priorityColor(t.priority)}"></span>`).join('')}
+      </div>
     </div>`;
   }
 
@@ -723,6 +716,9 @@ function bindSwipe(row) {
 
   row.addEventListener('touchstart', (e) => {
     if (e.touches.length !== 1) return;
+    // у самого края экрана приоритет за жестом «назад»: иначе строка уезжает
+    // вбок вместо того, чтобы выдвинуть меню
+    if (e.touches[0].clientX <= EDGE_ZONE) return;
     startX = e.touches[0].clientX;
     startY = e.touches[0].clientY;
     dx = 0;
@@ -1120,6 +1116,55 @@ let quickAddWhenTouched = false;
 let quickAddParsed = null;
 let quickAddDefaultWhen = '';
 
+// ---------------- Голосовой ввод в быстром добавлении ----------------
+// Промежуточный результат показываем прямо в поле, но поверх текста, набранного
+// до нажатия на микрофон: иначе повторная диктовка затирала бы уже введённое.
+let voiceBaseText = '';
+let voiceInput = null;
+
+function setVoiceStatus(msg, kind = '') {
+  const el = $('#quickAddVoiceStatus');
+  el.textContent = msg || '';
+  el.className = 'voice-status' + (kind ? ' ' + kind : '');
+  el.hidden = !msg;
+}
+
+function applyVoiceText(chunk, isFinal) {
+  const merged = voiceBaseText ? `${voiceBaseText} ${chunk}` : chunk;
+  $('#quickAddTitle').value = merged;
+  if (isFinal) {
+    voiceBaseText = merged;
+    // после финального куска разбираем строку — так время из «в 13:30» попадает в поля
+    renderQuickAddParse();
+  }
+}
+
+function initVoiceInput() {
+  if (voiceInput || !speechSupported()) return;
+  voiceInput = createVoiceInput({
+    onInterim: (t) => applyVoiceText(t, false),
+    onFinal: (t) => applyVoiceText(t, true),
+    onState: (active) => {
+      $('#btnQuickAddMic').classList.toggle('recording', active);
+      if (active) {
+        voiceBaseText = $('#quickAddTitle').value.trim();
+        setVoiceStatus('Слушаю… говорите, например «встретить брата в 13:30»');
+      } else if (!$('#quickAddVoiceStatus').classList.contains('error')) {
+        setVoiceStatus('');
+        $('#quickAddTitle').focus();
+      }
+    },
+    onError: (msg) => setVoiceStatus(msg, 'error'),
+  });
+  $('#btnQuickAddMic').hidden = false;
+}
+
+function stopVoiceInput() {
+  voiceInput?.stop();
+  setVoiceStatus('');
+  $('#btnQuickAddMic').classList.remove('recording');
+}
+
 function openQuickAdd() {
   closePalette();
   closePicker();
@@ -1138,6 +1183,9 @@ function openQuickAdd() {
   $('#quickAddLead').hidden = true;
   $('#quickAddWhenDate').hidden = true;
   if (currentView.type === 'project') $('#quickAddProject').value = currentView.id;
+  initVoiceInput();
+  stopVoiceInput();
+  voiceBaseText = '';
   renderQuickAddParse();
   $('#quickAddOverlay').classList.add('open');
   setTimeout(() => $('#quickAddTitle').focus(), 30);
@@ -1234,6 +1282,8 @@ function syncQuickChipState() {
   });
 }
 function closeQuickAdd() {
+  // микрофон должен глохнуть вместе с модалкой, иначе слушает в фоне
+  stopVoiceInput();
   $('#quickAddOverlay').classList.remove('open');
 }
 // Поле даты в быстром добавлении: значение живёт в data-value, подпись — человекочитаемая
@@ -1370,16 +1420,30 @@ function closePalette() {
 // закрытие баннера запоминаем — иначе он возвращается при каждой перезагрузке
 const NOTIF_DISMISS_KEY = 'tasksApp.notifBannerDismissed';
 let notifBannerDismissed = localStorage.getItem(NOTIF_DISMISS_KEY) === '1';
+// В нативной сборке window.Notification нет вовсе — разрешение спрашивает система,
+// поэтому состояние баннера приходится держать отдельным флагом.
+let nativeNotifGranted = false;
+
 function updateNotifBanner() {
   const banner = $('#notifBanner');
   if (!banner) return;
+  const textEl = $('#notifBannerText');
+  const btn = $('#btnEnableNotif');
+
+  if (isNativeApp()) {
+    if (nativeNotifGranted || notifBannerDismissed) { banner.hidden = true; return; }
+    banner.hidden = false;
+    // повторный запрос система молча отклоняет, дальше только через Настройки
+    textEl.textContent = '🔕 Уведомления выключены — включите их в Настройках iOS для «Задач».';
+    btn.hidden = true;
+    return;
+  }
+
   if (!('Notification' in window) || Notification.permission === 'granted' || notifBannerDismissed) {
     banner.hidden = true;
     return;
   }
   banner.hidden = false;
-  const textEl = $('#notifBannerText');
-  const btn = $('#btnEnableNotif');
   if (Notification.permission === 'denied') {
     textEl.textContent = '🔕 Уведомления заблокированы в браузере — включи их в настройках сайта.';
     btn.hidden = true;
@@ -1390,8 +1454,35 @@ function updateNotifBanner() {
 }
 
 function requestNotifPermission() {
+  if (isNativeApp()) {
+    requestNativeNotifPermission().then(granted => {
+      nativeNotifGranted = granted;
+      updateNotifBanner();
+      if (granted) scheduleSyncSoon();
+    });
+    return;
+  }
   if (!('Notification' in window)) return;
   Notification.requestPermission().then(updateNotifBanner);
+}
+
+// Расписание в системе должно отражать актуальные задачи: любое изменение —
+// повод пересобрать его заново.
+function setupNativeNotifications() {
+  if (!isNativeApp()) return;
+  store.subscribe(scheduleSyncSoon);
+  initNativeNotifications({
+    onOpenTask: (taskId) => {
+      const t = store.state.tasks[taskId];
+      if (!t) return;
+      currentView = pickViewForTask(t);
+      selectedTaskId = taskId;
+      renderAll();
+    },
+  }).then(({ granted }) => {
+    nativeNotifGranted = granted;
+    updateNotifBanner();
+  });
 }
 
 function fireReminderNotifications() {
@@ -1545,16 +1636,34 @@ document.addEventListener('DOMContentLoaded', () => {
     try { localStorage.setItem(NOTIF_DISMISS_KEY, '1'); } catch (_) { /* не критично */ }
     updateNotifBanner();
   });
-  setTimeout(fireReminderNotifications, 2000);
-  setInterval(fireReminderNotifications, 20000);
+  // В нативной сборке опрос не нужен и вреден: уведомления уже стоят в системе,
+  // и он показал бы их второй раз поверх системного.
+  if (isNativeApp()) {
+    setupNativeNotifications();
+  } else {
+    setTimeout(fireReminderNotifications, 2000);
+    setInterval(fireReminderNotifications, 20000);
+  }
 
   $('#btnMenu').addEventListener('click', () => $('#app').classList.toggle('sidebar-open'));
   $('#sidebarScrim').addEventListener('click', closeMobileSidebar);
+
+  // Жесты от левого края. Панель деталей и сайдбар переживают перерисовку —
+  // внутри меняется только innerHTML, так что привязываемся один раз.
+  bindDetailBackSwipe($('#detailPanel'), {
+    isOpen: () => $('#app').classList.contains('detail-open'),
+    onClose: () => { selectedTaskId = null; renderAll(); },
+  });
+  bindSidebarSwipe($('#app'), $('.sidebar'), $('#sidebarScrim'));
 
   $('#btnQuickAdd').addEventListener('click', openQuickAdd);
   $('#btnFab').addEventListener('click', openQuickAdd);
   $('#quickAddSubmit').addEventListener('click', submitQuickAdd);
   $('#quickAddTitle').addEventListener('input', renderQuickAddParse);
+  $('#btnQuickAddMic').addEventListener('click', () => {
+    setVoiceStatus('');
+    voiceInput?.toggle();
+  });
   $('#quickAddQuickChips').addEventListener('click', (e) => {
     const chip = e.target.closest('.quick-chip');
     if (chip) setQuickChip(chip.dataset.when);

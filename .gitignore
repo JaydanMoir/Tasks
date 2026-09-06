@@ -1,0 +1,11 @@
+node_modules/
+www/
+/capacitor.js
+ios/App/App/public/
+ios/App/Pods/
+ios/App/build/
+ios/DerivedData/
+.DS_Store
+.claude/
+ios/App/App.xcodeproj/xcuserdata/
+ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
