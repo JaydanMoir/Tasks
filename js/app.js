@@ -4,6 +4,7 @@ import { parseQuickInput, describeWhen } from './nlp.js?v=15';
 import { createVoiceInput, speechSupported } from './voice.js?v=15';
 import { isNativeApp, initNativeNotifications, requestPermission as requestNativeNotifPermission, hasPermission as hasNativeNotifPermission, scheduleSyncSoon } from './notifications.js?v=15';
 import { bindDetailBackSwipe, bindSidebarSwipe, EDGE_ZONE } from './edgeswipe.js?v=15';
+import { exportBackup } from './backup.js?v=15';
 
 // ---------------- UI state (not persisted) ----------------
 let currentView = { type: 'today' };
@@ -824,6 +825,13 @@ function renderDetail() {
 
   panel.innerHTML = `
     <div class="detail-panel-header">
+      <!-- На телефоне это отдельный экран, и уместна кнопка возврата;
+           в боковой колонке на большом экране — привычный крестик.
+           Разводятся стилями, обработчик один. -->
+      <button class="detail-back-btn" id="detBack">
+        <svg viewBox="0 0 12 20" width="11" height="17" aria-hidden="true"><path d="M10 1L2 10l8 9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Назад
+      </button>
       <button class="detail-close-btn" id="detClose" title="Закрыть (Esc)">✕</button>
     </div>
     <textarea class="detail-title-input" id="detTitle" rows="1">${esc(task.title)}</textarea>
@@ -938,10 +946,9 @@ function renderDetail() {
     </div>
   `;
 
-  $('#detClose').addEventListener('click', () => {
-    selectedTaskId = null;
-    renderAll();
-  });
+  const closeDetail = () => { selectedTaskId = null; renderAll(); };
+  $('#detClose').addEventListener('click', closeDetail);
+  $('#detBack').addEventListener('click', closeDetail);
 
   autoGrow($('#detTitle'));
   $('#detTitle').addEventListener('input', (e) => {
@@ -1141,6 +1148,11 @@ function applyVoiceText(chunk, isFinal) {
 
 function initVoiceInput() {
   if (voiceInput || !speechSupported()) return;
+  // свернули приложение во время диктовки — сеанс надо оборвать,
+  // иначе микрофон остаётся захваченным в фоне
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stopVoiceInput();
+  });
   voiceInput = createVoiceInput({
     onInterim: (t) => applyVoiceText(t, false),
     onFinal: (t) => applyVoiceText(t, true),
@@ -1160,7 +1172,9 @@ function initVoiceInput() {
 }
 
 function stopVoiceInput() {
-  voiceInput?.stop();
+  // именно cancel: stop() ждёт, пока распознавание доучтёт услышанное,
+  // и всё это время микрофон остаётся занятым
+  voiceInput?.cancel();
   setVoiceStatus('');
   $('#btnQuickAddMic').classList.remove('recording');
 }
@@ -1709,17 +1723,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  $('#btnExport').addEventListener('click', () => {
+  $('#btnExport').addEventListener('click', async () => {
     const data = JSON.stringify(store.state, null, 2);
-    const blob = new Blob([data], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `tasks-backup-${todayStr()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    const res = await exportBackup(data, `tasks-backup-${todayStr()}.json`);
+    if (!res.ok) showToast('Не удалось выгрузить копию');
+    else if (res.via === 'share') closeMobileSidebar();
   });
   $('#btnImport').addEventListener('click', () => $('#importFile').click());
   $('#importFile').addEventListener('change', (e) => {

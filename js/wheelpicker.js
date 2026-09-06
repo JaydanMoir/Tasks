@@ -198,44 +198,155 @@ export function isPickerOpen() {
 }
 
 // ---------------------------------------------------------------- дата
-export function openDatePicker({ value, title = 'Дата', allowClear = false, clearLabel, onPick }) {
-  const today = new Date();
-  const base = /^\d{4}-\d{2}-\d{2}$/.test(value || '')
-    ? value.split('-').map(Number)
-    : [today.getFullYear(), today.getMonth() + 1, today.getDate()];
-  const [y0, m0, d0] = base;
+// Барабан для даты не прижился: чтобы попасть в «седьмое», надо было прокрутить
+// три колонки, и при этом не видно ни дня недели, ни того, что рядом. Сетка
+// месяца отвечает на оба вопроса сразу, а нужное число — одно касание.
 
-  const minYear = Math.min(today.getFullYear() - 5, y0);
-  const maxYear = Math.max(today.getFullYear() + 10, y0);
-  const years = [];
-  for (let y = minYear; y <= maxYear; y++) years.push({ value: y, label: String(y) });
+const WEEKDAYS_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 
-  const dayItems = (y, m) => Array.from({ length: daysInMonth(y, m - 1) },
-    (_, i) => ({ value: i + 1, label: pad2(i + 1) }));
+const fmtDay = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const isDay = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+const shiftDays = (dateStr, n) => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + n);
+  return fmtDay(dt);
+};
 
-  openPicker({
-    title,
-    allowClear,
-    clearLabel,
-    columns: [
-      { key: 'day', items: dayItems(y0, m0), value: d0, flex: 0.7 },
-      { key: 'month', items: MONTHS.map((n, i) => ({ value: i + 1, label: n })), value: m0, flex: 1.4 },
-      { key: 'year', items: years, value: y0, flex: 1 },
-    ],
-    // 31 января → февраль: день надо пересобрать и подтянуть к последнему числу
-    onColumnChange: (key, _v, wheels) => {
-      if (key !== 'month' && key !== 'year') return;
-      const y = wheels.year.value, m = wheels.month.value;
-      const max = daysInMonth(y, m - 1);
-      if (wheels.day.items.length === max) return;
-      wheels.day.setItems(dayItems(y, m), Math.min(wheels.day.value, max));
-    },
-    onPick: (v) => {
-      if (!v) return onPick(null);
-      const max = daysInMonth(v.year, v.month - 1);
-      onPick(`${v.year}-${pad2(v.month)}-${pad2(Math.min(v.day, max))}`);
-    },
+export function openDatePicker({ value, title = 'Дата', allowClear = false, clearLabel = 'Очистить', onPick }) {
+  closePicker();
+
+  const today = fmtDay(new Date());
+  let selected = isDay(value) ? value : today;
+  // месяц, показанный в сетке; листается независимо от выбранного дня
+  let [viewY, viewM] = selected.split('-').map(Number);
+
+  // ближайшая суббота; сегодняшнюю субботу считаем подходящей
+  const weekendDate = () => {
+    const now = new Date();
+    return shiftDays(today, (6 - now.getDay() + 7) % 7);
+  };
+
+  const overlay = document.createElement('div');
+  overlay.className = 'picker-overlay';
+  overlay.innerHTML = `
+    <div class="picker-sheet cal-sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <div class="picker-head">
+        <button type="button" class="picker-btn" data-act="cancel">Отмена</button>
+        <span class="picker-title">${esc(title)}</span>
+        <button type="button" class="picker-btn strong" data-act="done">Готово</button>
+      </div>
+
+      <div class="cal-sheet-quick">
+        <button type="button" class="cal-sheet-chip" data-jump="today">Сегодня</button>
+        <button type="button" class="cal-sheet-chip" data-jump="tomorrow">Завтра</button>
+        <button type="button" class="cal-sheet-chip" data-jump="weekend">Выходные</button>
+        <button type="button" class="cal-sheet-chip" data-jump="week">Через неделю</button>
+      </div>
+
+      <div class="cal-sheet-nav">
+        <button type="button" class="cal-sheet-arrow" data-move="-1" aria-label="Предыдущий месяц">‹</button>
+        <span class="cal-sheet-month" data-role="month"></span>
+        <button type="button" class="cal-sheet-arrow" data-move="1" aria-label="Следующий месяц">›</button>
+      </div>
+
+      <div class="cal-sheet-weekdays">
+        ${WEEKDAYS_SHORT.map(w => `<span>${w}</span>`).join('')}
+      </div>
+      <div class="cal-sheet-grid" data-role="grid"></div>
+
+      ${allowClear ? `<button type="button" class="picker-clear" data-act="clear">${esc(clearLabel)}</button>` : ''}
+    </div>`;
+  document.body.appendChild(overlay);
+  document.body.classList.add('picker-open');
+
+  const monthEl = overlay.querySelector('[data-role="month"]');
+  const gridEl = overlay.querySelector('[data-role="grid"]');
+
+  function render() {
+    monthEl.textContent = `${MONTHS[viewM - 1]} ${viewY}`;
+
+    const firstWeekday = (new Date(viewY, viewM - 1, 1).getDay() + 6) % 7; // Пн = 0
+    const total = daysInMonth(viewY, viewM - 1);
+    const prevTotal = daysInMonth(viewY, viewM - 2);
+    const cells = Math.ceil((firstWeekday + total) / 7) * 7;
+
+    let html = '';
+    for (let i = 0; i < cells; i++) {
+      const dayNum = i - firstWeekday + 1;
+      let date, label, outside = false;
+      if (dayNum < 1) {
+        outside = true; label = prevTotal + dayNum;
+        date = fmtDay(new Date(viewY, viewM - 2, label));
+      } else if (dayNum > total) {
+        outside = true; label = dayNum - total;
+        date = fmtDay(new Date(viewY, viewM, label));
+      } else {
+        label = dayNum;
+        date = `${viewY}-${pad2(viewM)}-${pad2(dayNum)}`;
+      }
+      const cls = ['cal-sheet-day'];
+      if (outside) cls.push('outside');
+      if (date === today) cls.push('today');
+      if (date === selected) cls.push('selected');
+      html += `<button type="button" class="${cls.join(' ')}" data-day="${date}">${label}</button>`;
+    }
+    gridEl.innerHTML = html;
+
+    overlay.querySelectorAll('.cal-sheet-chip').forEach(chip => {
+      const target = { today, tomorrow: shiftDays(today, 1), weekend: weekendDate(), week: shiftDays(today, 7) }[chip.dataset.jump];
+      chip.classList.toggle('active', target === selected);
+    });
+  }
+
+  const finish = (result) => { closePicker(); onPick?.(result); };
+
+  overlay.addEventListener('click', (e) => {
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'cancel') return closePicker();
+    if (act === 'done') return finish(selected);
+    if (act === 'clear') return finish(null);
+
+    const move = e.target.closest('[data-move]')?.dataset.move;
+    if (move) {
+      const dt = new Date(viewY, viewM - 1 + Number(move), 1);
+      viewY = dt.getFullYear(); viewM = dt.getMonth() + 1;
+      return render();
+    }
+
+    const jump = e.target.closest('[data-jump]')?.dataset.jump;
+    if (jump) {
+      selected = { today, tomorrow: shiftDays(today, 1), weekend: weekendDate(), week: shiftDays(today, 7) }[jump];
+      [viewY, viewM] = selected.split('-').map(Number);
+      return render();
+    }
+
+    const day = e.target.closest('[data-day]')?.dataset.day;
+    if (day) {
+      selected = day;
+      // тап по «хвосту» соседнего месяца перелистывает сетку туда же
+      const [y, m] = day.split('-').map(Number);
+      if (y !== viewY || m !== viewM) { viewY = y; viewM = m; }
+      return render();
+    }
+
+    if (e.target === overlay) closePicker();
   });
+
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePicker(); }
+    else if (e.key === 'Enter') { e.preventDefault(); finish(selected); }
+  });
+
+  render();
+  requestAnimationFrame(() => {
+    overlay.classList.add('open');
+    overlay.querySelector('.cal-sheet-day.selected')?.focus({ preventScroll: true });
+  });
+
+  // closePicker перебирает wheels — у календаря барабанов нет, но ключ нужен
+  openSheet = { overlay, wheels: {} };
+  return openSheet;
 }
 
 // ---------------------------------------------------------------- время

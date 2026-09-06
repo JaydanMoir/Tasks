@@ -1400,3 +1400,365 @@ body.picker-open { overflow: hidden; }
   #searchInput { font-size: 16px; }
   #paletteInput { font-size: 17px; }
 }
+
+/* ==================== Лист выбора даты: сетка месяца ====================
+   Живёт в той же «шторке», что и барабан времени, — отличается только начинкой. */
+
+.cal-sheet-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px 12px 4px;
+}
+.cal-sheet-chip {
+  border: 1px solid var(--border);
+  background: var(--bg-main);
+  color: var(--text-secondary);
+  border-radius: 15px;
+  padding: 7px 13px;
+  font-size: 13.5px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cal-sheet-chip:hover { border-color: var(--text-tertiary); color: var(--text-primary); }
+.cal-sheet-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 500;
+}
+
+.cal-sheet-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px 2px;
+}
+.cal-sheet-month {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.cal-sheet-arrow {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--accent);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.cal-sheet-arrow:hover { background: var(--row-hover); }
+
+.cal-sheet-weekdays,
+.cal-sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  padding: 0 10px;
+}
+.cal-sheet-weekdays {
+  gap: 2px;
+  padding-top: 6px;
+  padding-bottom: 2px;
+}
+.cal-sheet-weekdays span {
+  text-align: center;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+.cal-sheet-grid { gap: 2px; padding-bottom: 12px; }
+
+.cal-sheet-day {
+  /* квадратная клетка: число визуально в центре, палец попадает уверенно */
+  aspect-ratio: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0;
+}
+.cal-sheet-day:hover { background: var(--row-hover); }
+.cal-sheet-day.outside { color: var(--text-tertiary); opacity: 0.55; }
+/* сегодня — только цветом, заливка зарезервирована за выбором */
+.cal-sheet-day.today { color: var(--accent); font-weight: 700; }
+.cal-sheet-day.selected {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.cal-sheet-day.selected.today { color: #fff; }
+
+@media (max-width: 640px) {
+  .cal-sheet-day { font-size: 17px; }
+  .cal-sheet-chip { font-size: 14px; padding: 8px 14px; }
+}
+
+/* ═══════════════════════ Материал: жидкое стекло ═══════════════════════
+   Полупрозрачные поверхности с размытием того, что под ними. Слой идёт
+   последним и намеренно перекрывает плоские фоны, объявленные выше. */
+
+:root {
+  --glass-blur: 22px;
+  --glass-bg: rgba(255, 255, 255, 0.60);
+  --glass-bg-strong: rgba(255, 255, 255, 0.80);
+  --glass-border: rgba(255, 255, 255, 0.55);
+  /* тонкий блик по верхней кромке — то, что и читается глазом как «стекло» */
+  --glass-edge: rgba(255, 255, 255, 0.9);
+  --glass-shadow: 0 12px 40px rgba(20, 28, 54, 0.14);
+  --glass-scrim: rgba(20, 24, 40, 0.18);
+  /* пятна на подложке: без них размывать нечего и стекло выглядит серой заливкой */
+  --tint-a: rgba(74, 125, 252, 0.16);
+  --tint-b: rgba(217, 130, 43, 0.10);
+  --tint-c: rgba(138, 111, 212, 0.10);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --glass-bg: rgba(32, 33, 38, 0.60);
+    --glass-bg-strong: rgba(32, 33, 38, 0.82);
+    --glass-border: rgba(255, 255, 255, 0.10);
+    --glass-edge: rgba(255, 255, 255, 0.14);
+    --glass-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+    --glass-scrim: rgba(0, 0, 0, 0.42);
+    --tint-a: rgba(74, 125, 252, 0.22);
+    --tint-b: rgba(217, 130, 43, 0.12);
+    --tint-c: rgba(138, 111, 212, 0.14);
+  }
+}
+
+/* ---- подложка ---- */
+body {
+  background:
+    radial-gradient(1100px 720px at 6% -14%, var(--tint-a), transparent 62%),
+    radial-gradient(900px 620px at 106% 2%, var(--tint-b), transparent 58%),
+    radial-gradient(760px 620px at 50% 116%, var(--tint-c), transparent 60%),
+    var(--bg-main);
+  background-attachment: fixed;
+}
+/* панели становятся прозрачными, иначе подложку не видно вовсе */
+.main-panel { background: transparent; border-right: 0; }
+.task-list { background: transparent; }
+
+/* ---- общая заготовка ---- */
+.sidebar,
+.modal,
+.picker-sheet,
+.context-menu,
+.toast,
+#app.detail-open .detail-panel {
+  -webkit-backdrop-filter: saturate(180%) blur(var(--glass-blur));
+  backdrop-filter: saturate(180%) blur(var(--glass-blur));
+}
+
+/* ---- боковое меню ---- */
+.sidebar {
+  background: var(--glass-bg);
+  border-right: 1px solid var(--glass-border);
+  box-shadow: inset 0 1px 0 var(--glass-edge);
+}
+@media (max-width: 700px) {
+  #app .sidebar,
+  #app.sidebar-collapsed .sidebar {
+    border-right: 1px solid var(--glass-border);
+    box-shadow: inset 0 1px 0 var(--glass-edge), var(--glass-shadow);
+  }
+  /* затемнение мягче: сама панель уже размывает фон, чернить его незачем */
+  .sidebar-scrim { background: var(--glass-scrim); }
+}
+
+/* ---- шапка ---- */
+.main-header { background: transparent; }
+
+/* ---- модальные окна и шторки ---- */
+.modal-overlay {
+  background: var(--glass-scrim);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.modal,
+.picker-sheet {
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  box-shadow: inset 0 1px 0 var(--glass-edge), var(--glass-shadow);
+}
+.modal { border-radius: 18px; }
+.picker-overlay.open {
+  background: var(--glass-scrim);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.picker-sheet { border-radius: 20px 20px 0 0; }
+@media (min-width: 640px) { .picker-sheet { border-radius: 18px; } }
+.picker-head { border-bottom: 1px solid var(--glass-border); }
+
+/* ---- карточка задачи как отдельный экран ---- */
+#app.detail-open .detail-panel {
+  background: var(--glass-bg-strong);
+}
+@media (min-width: 701px) {
+  .detail-panel { background: var(--glass-bg); border-left: 1px solid var(--glass-border); }
+}
+
+/* ---- контекстное меню и подсказка ---- */
+.context-menu {
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 var(--glass-edge), var(--glass-shadow);
+}
+.toast {
+  background: var(--glass-bg-strong);
+  color: var(--text-primary);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 var(--glass-edge), var(--glass-shadow);
+}
+.toast button {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ---- кнопка добавления ---- */
+.fab {
+  background: linear-gradient(160deg, #6b98ff, var(--accent) 55%, #3a67e0);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 8px 24px rgba(74, 125, 252, 0.42);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+/* ---- пилюли: чипсы, теги, приоритеты ---- */
+.quick-chip,
+.cal-sheet-chip,
+.cal-nav-btn,
+.cal-select,
+.mic-btn,
+.date-field,
+select.detail-select {
+  background: var(--glass-bg);
+  border-color: var(--glass-border);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+/* ---- отклик на нажатие ----
+   :hover на телефоне не срабатывает, и без этого касание выглядит как промах */
+.task-row:active,
+.nav-item:active,
+.tree-item:active,
+.ctx-item:active { background: var(--row-selected); }
+.quick-chip:active,
+.cal-sheet-chip:active,
+.cal-sheet-day:active,
+.priority-opt:active,
+.cal-nav-btn:active,
+.mic-btn:active,
+.picker-btn:active { transform: scale(0.96); }
+.fab:active { transform: scale(0.93); }
+.quick-add-btn:active,
+.quick-add-row button:active { transform: scale(0.98); filter: brightness(0.95); }
+
+.fab,
+.quick-chip,
+.cal-sheet-chip,
+.cal-sheet-day,
+.priority-opt,
+.cal-nav-btn,
+.mic-btn,
+.picker-btn,
+.quick-add-btn,
+.quick-add-row button { transition: transform 0.12s ease, background-color 0.12s ease, filter 0.12s ease; }
+
+/* Уважаем системную настройку: без анимаций остаётся только смена цвета */
+@media (prefers-reduced-motion: reduce) {
+  .fab, .quick-chip, .cal-sheet-chip, .cal-sheet-day, .priority-opt,
+  .cal-nav-btn, .mic-btn, .picker-btn, .quick-add-btn,
+  .quick-add-row button { transition: background-color 0.12s ease; }
+  .fab:active, .quick-chip:active, .cal-sheet-chip:active, .cal-sheet-day:active,
+  .priority-opt:active, .cal-nav-btn:active, .mic-btn:active,
+  .picker-btn:active, .quick-add-btn:active,
+  .quick-add-row button:active { transform: none; }
+}
+
+/* ==================== Карточка задачи ==================== */
+
+/* Нижние действия — одной карточкой со сплошными разделителями вместо
+   трёх отдельных рамок: три обведённых прямоугольника подряд читаются
+   как незаконченная вёрстка, а не как список действий. */
+.detail-actions {
+  margin-top: 28px;
+  gap: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow: inset 0 1px 0 var(--glass-edge);
+}
+.detail-btn {
+  border: 0;
+  border-bottom: 1px solid var(--glass-border);
+  border-radius: 0;
+  background: transparent;
+  padding: 14px 16px;
+  font-size: 15px;
+}
+.detail-btn:last-child { border-bottom: 0; }
+.detail-btn:hover { background: var(--row-hover); }
+.detail-btn:active { background: var(--row-selected); }
+.detail-btn.danger { color: var(--danger); border-color: var(--glass-border); }
+
+/* Кнопка возврата видна только на телефоне, крестик — только на большом экране */
+.detail-back-btn { display: none; }
+.detail-back-btn {
+  align-items: center;
+  gap: 3px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 17px;
+  padding: 6px 8px 6px 0;
+  cursor: pointer;
+}
+.detail-back-btn:active { opacity: 0.55; }
+
+@media (max-width: 700px) {
+  .detail-back-btn { display: flex; }
+  .detail-close-btn { display: none; }
+
+  /* Шапка закреплена сверху и накрывает статус-бар: раньше отступ под него
+     был частью прокручиваемого содержимого, и при прокрутке текст уезжал
+     под часы. Теперь под шапкой проходит контент, а она остаётся на месте. */
+  #app.detail-open .detail-panel { padding-top: 0; }
+  .detail-panel-header {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    justify-content: flex-start;
+    margin: 0 -16px 10px;
+    padding: env(safe-area-inset-top, 0px) 16px 10px;
+    background: var(--glass-bg-strong);
+    -webkit-backdrop-filter: saturate(180%) blur(var(--glass-blur));
+    backdrop-filter: saturate(180%) blur(var(--glass-blur));
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .detail-actions { margin-top: 32px; margin-bottom: 8px; }
+  .detail-btn { font-size: 16px; padding: 15px 16px; }
+}

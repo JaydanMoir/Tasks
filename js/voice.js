@@ -37,6 +37,7 @@ export function normalizeSpeech(text) {
 export function createVoiceInput({ lang = 'ru-RU', onInterim, onFinal, onState, onError } = {}) {
   let rec = null;
   let active = false;
+  let watchdog = null;
 
   const setActive = (v) => {
     if (active === v) return;
@@ -44,8 +45,28 @@ export function createVoiceInput({ lang = 'ru-RU', onInterim, onFinal, onState, 
     onState?.(active);
   };
 
+  // Страховка: если onend по какой-то причине не придёт, микрофон остался бы
+  // занятым — в статус-баре iOS так и горела бы оранжевая точка. Через минуту
+  // молчания глушим принудительно.
+  const armWatchdog = () => {
+    clearTimeout(watchdog);
+    watchdog = setTimeout(() => cancel(), 60000);
+  };
+
+  // stop() даёт распознаванию доучесть услышанное и вернуть последний кусок.
   function stop() {
     if (rec) rec.stop();
+  }
+
+  // cancel() рвёт сеанс сразу, не дожидаясь результата — так микрофон
+  // освобождается быстрее. Для закрытия окна нужен именно он.
+  function cancel() {
+    clearTimeout(watchdog);
+    if (!rec) return;
+    const r = rec;
+    rec = null;
+    try { r.abort(); } catch { /* уже закрыт */ }
+    setActive(false);
   }
 
   function start() {
@@ -56,7 +77,7 @@ export function createVoiceInput({ lang = 'ru-RU', onInterim, onFinal, onState, 
     rec.continuous = false;
     rec.maxAlternatives = 1;
 
-    rec.onstart = () => setActive(true);
+    rec.onstart = () => { setActive(true); armWatchdog(); };
 
     rec.onresult = (e) => {
       let interim = '';
@@ -66,6 +87,7 @@ export function createVoiceInput({ lang = 'ru-RU', onInterim, onFinal, onState, 
         if (r.isFinal) final += r[0].transcript;
         else interim += r[0].transcript;
       }
+      armWatchdog();
       if (final) onFinal?.(normalizeSpeech(final));
       else if (interim) onInterim?.(interim.trim());
     };
@@ -77,7 +99,7 @@ export function createVoiceInput({ lang = 'ru-RU', onInterim, onFinal, onState, 
     };
 
     // onend приходит и после ошибки, и после нормального завершения — один выход из режима
-    rec.onend = () => { rec = null; setActive(false); };
+    rec.onend = () => { clearTimeout(watchdog); rec = null; setActive(false); };
 
     try {
       rec.start();
@@ -91,6 +113,7 @@ export function createVoiceInput({ lang = 'ru-RU', onInterim, onFinal, onState, 
   return {
     start,
     stop,
+    cancel,
     toggle: () => (active ? stop() : start()),
     isActive: () => active,
   };
