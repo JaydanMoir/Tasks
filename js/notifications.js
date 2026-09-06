@@ -13,6 +13,15 @@ const MAX_SCHEDULED = 56;
 // «Повторять каждые N минут» — бесконечный по смыслу, но системе нужен конечный список
 const MAX_REPEAT_FOLLOWUPS = 6;
 
+// Кнопки прямо в уведомлении: закрыть задачу или отложить, не открывая приложение.
+// Ради этого напоминания и существуют — заставлять ради галочки заходить внутрь незачем.
+const ACTION_TYPE = 'TASK_REMINDER';
+const SNOOZE_MINUTES = 10;
+// Отложенные уведомления живут в собственном диапазоне идентификаторов выше
+// этой границы. Так они, во-первых, не сталкиваются с плановыми, а во-вторых —
+// переживают пересборку расписания, которая отменяет всё остальное.
+const SNOOZE_ID_BASE = 2000000000;
+
 export function isNativeApp() {
   return Boolean(window.Capacitor?.isNativePlatform?.());
 }
@@ -36,7 +45,8 @@ function notifId(taskId, kind, seq = 0) {
     h ^= s.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  return h >>> 1; // положительное 31-битное
+  // остаток удерживает значение ниже диапазона отложенных
+  return (h >>> 1) % SNOOZE_ID_BASE;
 }
 
 function hm(time) {
@@ -100,6 +110,7 @@ function entriesForTask(task, today) {
       body: bodyFor(task, kind),
       // повторяющиеся отдаём календарным триггером: один слот вместо копии на каждый день
       schedule: daily ? { on: hm(time) } : { at: fireAt },
+      actionTypeId: ACTION_TYPE,
       extra: { taskId: task.id, kind },
       sortAt: fireAt.getTime(),
     });
@@ -121,6 +132,7 @@ function entriesForTask(task, today) {
         title: task.title,
         body: bodyFor(task, 'main'),
         schedule: { at: fireAt },
+        actionTypeId: ACTION_TYPE,
         extra: { taskId: task.id, kind: 'repeat' },
         sortAt: fireAt.getTime(),
       });
@@ -172,8 +184,11 @@ export async function syncSchedule() {
   syncing = true;
   try {
     const pending = await ln.getPending();
-    if (pending.notifications.length) {
-      await ln.cancel({ notifications: pending.notifications.map(n => ({ id: n.id })) });
+    // Отложенные вручную не трогаем: они не выводятся из состояния задач,
+    // и пересборка расписания их бы просто стёрла.
+    const stale = pending.notifications.filter(n => n.id < SNOOZE_ID_BASE);
+    if (stale.length) {
+      await ln.cancel({ notifications: stale.map(n => ({ id: n.id })) });
     }
     const notifications = buildSchedule();
     if (notifications.length) await ln.schedule({ notifications });
@@ -191,15 +206,52 @@ export function scheduleSyncSoon() {
   syncTimer = setTimeout(syncSchedule, 400);
 }
 
+// Отложить: одноразовое уведомление через SNOOZE_MINUTES. В расписание задачи
+// оно не входит и переживает пересборку только до ближайшего syncSchedule —
+// поэтому ставим его отдельным id, который планировщик не занимает.
+async function snooze(notification) {
+  const ln = localNotifications();
+  if (!ln) return;
+  const at = new Date(Date.now() + SNOOZE_MINUTES * 60000);
+  await ln.schedule({
+    notifications: [{
+      id: SNOOZE_ID_BASE + (notification.id % 100000000),
+      title: notification.title,
+      body: notification.body,
+      schedule: { at },
+      actionTypeId: ACTION_TYPE,
+      extra: notification.extra,
+    }],
+  });
+}
+
 // ---------------- подключение ----------------
 
-export async function initNativeNotifications({ onOpenTask } = {}) {
+export async function initNativeNotifications({ onOpenTask, onCompleteTask } = {}) {
   const ln = localNotifications();
   if (!ln) return { granted: false, available: false };
 
-  await ln.addListener('localNotificationActionPerformed', (event) => {
+  await ln.registerActionTypes({
+    types: [{
+      id: ACTION_TYPE,
+      actions: [
+        { id: 'complete', title: 'Выполнить' },
+        { id: 'snooze', title: `Отложить на ${SNOOZE_MINUTES} мин` },
+      ],
+    }],
+  });
+
+  await ln.addListener('localNotificationActionPerformed', async (event) => {
     const taskId = event?.notification?.extra?.taskId;
-    if (taskId) onOpenTask?.(taskId);
+    if (!taskId) return;
+    // 'tap' — обычное нажатие на само уведомление, остальное — наши кнопки
+    if (event.actionId === 'complete') {
+      onCompleteTask?.(taskId);
+    } else if (event.actionId === 'snooze') {
+      await snooze(event.notification);
+    } else {
+      onOpenTask?.(taskId);
+    }
   });
 
   // расписание живо ровно до следующего запуска: пока приложение было закрыто,

@@ -5,6 +5,7 @@ import { createVoiceInput, speechSupported } from './voice.js?v=15';
 import { isNativeApp, initNativeNotifications, requestPermission as requestNativeNotifPermission, hasPermission as hasNativeNotifPermission, scheduleSyncSoon } from './notifications.js?v=15';
 import { bindDetailBackSwipe, bindSidebarSwipe, EDGE_ZONE } from './edgeswipe.js?v=15';
 import { exportBackup } from './backup.js?v=15';
+import { tapLight, tapMedium, tapSuccess } from './haptics.js?v=15';
 
 // ---------------- UI state (not persisted) ----------------
 let currentView = { type: 'today' };
@@ -648,7 +649,10 @@ function bindTaskListEvents() {
   listEl.querySelectorAll('[data-checkbox]').forEach(el => {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
+      const wasActive = store.state.tasks[el.dataset.checkbox]?.status === 'active';
       store.toggleComplete(el.dataset.checkbox);
+      // закрытие задачи ощущается иначе, чем снятие галочки — и должно
+      if (wasActive) tapSuccess(); else tapLight();
     });
   });
   listEl.querySelectorAll('[data-tag-filter]').forEach(el => {
@@ -669,6 +673,8 @@ function bindTaskListEvents() {
   });
   listEl.querySelectorAll('.task-row').forEach(el => {
     el.addEventListener('click', () => {
+      // меню уже открыто удержанием — тот же тап не должен ещё и проваливать в карточку
+      if (!$('#taskContextMenu').hidden) return;
       selectedTaskId = el.dataset.id;
       renderAll();
     });
@@ -706,6 +712,8 @@ function bindSwipe(row) {
   if (!lane || !lane.classList.contains('task-swipe')) return;
   let startX = 0, startY = 0, dx = 0;
   let tracking = false, decided = false, horizontal = false;
+  let pressTimer = null;
+  const cancelPress = () => { clearTimeout(pressTimer); pressTimer = null; };
 
   const reset = (animate = true) => {
     row.style.transition = animate ? 'transform 0.18s ease' : '';
@@ -725,6 +733,17 @@ function bindSwipe(row) {
     dx = 0;
     tracking = true; decided = false; horizontal = false;
     row.style.transition = '';
+
+    // Долгое нажатие открывает то же меню, что правый клик на настольном
+    // экране: без него быстрые действия на телефоне были недоступны вовсе.
+    cancelPress();
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      tracking = false;
+      reset(false);
+      tapMedium();
+      openContextMenu(row.dataset.id, startX, startY);
+    }, 480);
   }, { passive: true });
 
   row.addEventListener('touchmove', (e) => {
@@ -735,6 +754,8 @@ function bindSwipe(row) {
 
     // Направление определяем один раз: иначе строка ползёт при обычной
     // вертикальной прокрутке списка.
+    if (Math.abs(ddx) > 6 || Math.abs(ddy) > 6) cancelPress();
+
     if (!decided) {
       if (Math.abs(ddx) < 8 && Math.abs(ddy) < 8) return;
       decided = true;
@@ -751,23 +772,26 @@ function bindSwipe(row) {
   }, { passive: false });
 
   const finish = () => {
+    cancelPress();
     if (!tracking || !horizontal) { tracking = false; return; }
     tracking = false;
     const id = row.dataset.id;
     if (dx <= -SWIPE_TRIGGER) {
       reset(false);
+      tapMedium();
       store.trashTask(id);
       if (selectedTaskId === id) selectedTaskId = null;
       showToast('Задача удалена', () => store.restoreTask(id));
     } else if (dx >= SWIPE_TRIGGER) {
       reset(false);
+      tapSuccess();
       store.toggleComplete(id);
     } else {
       reset(true);
     }
   };
   row.addEventListener('touchend', finish);
-  row.addEventListener('touchcancel', () => { tracking = false; reset(true); });
+  row.addEventListener('touchcancel', () => { cancelPress(); tracking = false; reset(true); });
 }
 
 // ---------------- Detail panel ----------------
@@ -834,8 +858,10 @@ function renderDetail() {
       </button>
       <button class="detail-close-btn" id="detClose" title="Закрыть (Esc)">✕</button>
     </div>
-    <textarea class="detail-title-input" id="detTitle" rows="1">${esc(task.title)}</textarea>
-    <textarea class="detail-notes-input" id="detNotes" placeholder="Заметки">${esc(task.notes)}</textarea>
+    <div class="detail-head-card">
+      <textarea class="detail-title-input" id="detTitle" rows="1">${esc(task.title)}</textarea>
+      <textarea class="detail-notes-input" id="detNotes" placeholder="Заметки">${esc(task.notes)}</textarea>
+    </div>
 
     <div class="detail-section">
       <div class="detail-label">Когда</div>
@@ -867,13 +893,10 @@ function renderDetail() {
       </div>
     </div>
 
-    <div class="detail-section">
-      <div class="detail-label">Дедлайн</div>
+      <div class="detail-label detail-label-sub">Дедлайн</div>
       ${dateFieldHtml('detDeadline', task.deadline, 'Без дедлайна', '🏁')}
-    </div>
 
-    <div class="detail-section">
-      <div class="detail-label">Повтор</div>
+      <div class="detail-label detail-label-sub">Повтор</div>
       <select class="detail-select" id="detRepeat">
         <option value="" ${!task.repeat ? 'selected' : ''}>Не повторяется</option>
         <option value="daily" ${task.repeat === 'daily' ? 'selected' : ''}>Каждый день</option>
@@ -899,19 +922,15 @@ function renderDetail() {
     <div class="detail-section">
       <div class="detail-label">Проект</div>
       <select class="detail-select" id="detProject">${projectOptions}</select>
-    </div>
 
-    ${taskHeadings.length ? `
-    <div class="detail-section">
-      <div class="detail-label">Раздел</div>
+      ${taskHeadings.length ? `
+      <div class="detail-label detail-label-sub">Раздел</div>
       <select class="detail-select" id="detHeading">
         <option value="">— нет —</option>
         ${taskHeadings.map(h => `<option value="${h.id}" ${task.headingId === h.id ? 'selected' : ''}>${esc(h.title)}</option>`).join('')}
-      </select>
-    </div>` : ''}
+      </select>` : ''}
 
-    <div class="detail-section">
-      <div class="detail-label">Область</div>
+      <div class="detail-label detail-label-sub">Область</div>
       <select class="detail-select" id="detArea" ${task.projectId ? 'disabled' : ''}>${areaOptions}</select>
     </div>
 
@@ -1107,6 +1126,24 @@ function commitInlineEdit() {
 }
 
 // ---------------- Quick Add ----------------
+
+// Клавиатура на iOS не сжимает раскладочный вьюпорт: окно быстрого добавления
+// прижато к низу экрана и уезжало под клавиатуру вместе с чипами дат и кнопкой
+// «Добавить». visualViewport знает настоящую видимую высоту — приподнимаем окно
+// ровно на закрытую часть. Работает и в браузере, и в приложении.
+function bindKeyboardInset() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const apply = () => {
+    const hidden = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    document.documentElement.style.setProperty('--keyboard-inset', `${Math.round(hidden)}px`);
+  };
+  vv.addEventListener('resize', apply);
+  vv.addEventListener('scroll', apply);
+  apply();
+}
+
+
 function populateQuickAddProjects() {
   const sel = $('#quickAddProject');
   const opts = ['<option value="">Входящие</option>'];
@@ -1186,8 +1223,14 @@ function openQuickAdd() {
   populateQuickAddProjects();
   $('#quickAddTitle').value = '';
   $('#quickAddNotes').value = '';
-  quickAddDefaultWhen = currentView.type === 'today' ? 'today' : (currentView.type === 'someday' ? 'someday' : '');
-  $('#quickAddWhen').value = quickAddDefaultWhen;
+  // В календаре выбранный день виден прямо на экране — логично, чтобы новая
+  // задача попадала именно на него, а не оказывалась без даты.
+  quickAddDefaultWhen = currentView.type === 'today' ? 'today'
+    : currentView.type === 'someday' ? 'someday'
+    : (currentView.type === 'calendar' && isDateStr(calendarSelectedDay)) ? calendarSelectedDay
+    : '';
+  // конкретную дату селект не примет — её выставит renderQuickAddParse ниже
+  $('#quickAddWhen').value = isDateStr(quickAddDefaultWhen) ? 'date' : quickAddDefaultWhen;
   // Значение селекта по умолчанию — это не «выбор пользователя»: набранное «завтра»
   // должно его перебивать. Флаг взводится только от реального касания.
   quickAddWhenTouched = false;
@@ -1215,12 +1258,15 @@ function renderQuickAddParse() {
   if (!quickAddWhenTouched) {
     const w = quickAddParsed.when;
     const sel = $('#quickAddWhen');
-    if (isDateStr(w)) {
+    // распознанное из текста важнее подставленного по умолчанию:
+    // набранное «завтра» перебивает день, выбранный в календаре
+    const fallback = w || quickAddDefaultWhen;
+    if (isDateStr(fallback)) {
       sel.value = 'date';
-      setQuickAddDate(w);
+      setQuickAddDate(fallback);
       $('#quickAddWhenDate').hidden = false;
     } else {
-      sel.value = w || quickAddDefaultWhen;
+      sel.value = fallback;
       setQuickAddDate(null);
       $('#quickAddWhenDate').hidden = true;
     }
@@ -1338,6 +1384,7 @@ function submitQuickAdd() {
     reminderLeadMinutes: parsed.time && $('#quickAddLead').value ? Number($('#quickAddLead').value) : null,
   });
   closeQuickAdd();
+  tapLight();
   showToast(`Добавлено: ${title}`);
 }
 
@@ -1493,6 +1540,14 @@ function setupNativeNotifications() {
       selectedTaskId = taskId;
       renderAll();
     },
+    // «Выполнить» из уведомления: задача закрывается сразу, приложение лишь
+    // догоняет состояние. Тоста не показываем — его всё равно никто не увидит.
+    onCompleteTask: (taskId) => {
+      const t = store.state.tasks[taskId];
+      if (!t || t.status === 'completed') return;
+      store.toggleComplete(taskId);
+      renderAll();
+    },
   }).then(({ granted }) => {
     nativeNotifGranted = granted;
     updateNotifBanner();
@@ -1559,22 +1614,43 @@ function openContextMenu(taskId, x, y) {
   contextMenuTaskId = taskId;
   const menu = $('#taskContextMenu');
   const items = [];
-  items.push({ icon: task.status === 'completed' ? '↺' : '✓', label: task.status === 'completed' ? 'Вернуть в активные' : 'Выполнить', action: () => store.toggleComplete(taskId) });
-  items.push({ sep: true });
-  // notifiedOn сбрасываем вместе с датой, иначе перенесённая задача не напомнит о себе заново
-  const setWhen = when => store.updateTask(taskId, { when, notifiedOn: null, lastNotifiedAt: null });
-  items.push({ icon: '☀', label: 'Сегодня', action: () => setWhen('today') });
-  items.push({ icon: '📆', label: 'Завтра', action: () => setWhen(addDays(todayStr(), 1)) });
-  items.push({ icon: '🌙', label: 'Этим вечером', action: () => setWhen('evening') });
-  items.push({ icon: '🌒', label: 'Когда-нибудь', action: () => setWhen('someday') });
-  items.push({ icon: '≡', label: 'Без даты', action: () => setWhen(null) });
-  items.push({ sep: true });
-  items.push({ icon: '⧉', label: 'Дублировать', action: () => { const c = store.duplicateTask(taskId); if (c) { selectedTaskId = c.id; renderAll(); } } });
-  items.push({ icon: '🗑', label: 'Удалить в корзину', danger: true, action: () => {
-    store.trashTask(taskId);
-    if (selectedTaskId === taskId) selectedTaskId = null;
-    showToast('Задача удалена', () => store.restoreTask(taskId));
-  } });
+  // Набор пунктов зависит от того, где задача лежит. В корзине переносить её
+  // «на завтра» бессмысленно, а в журнале главное действие — вернуть в работу,
+  // и ради него не должно приходиться открывать карточку и листать до низа.
+  if (task.status === 'trashed') {
+    items.push({ icon: '↺', label: 'Восстановить', action: () => { store.restoreTask(taskId); tapLight(); } });
+    items.push({ sep: true });
+    items.push({ icon: '⌫', label: 'Удалить навсегда', danger: true, action: () => {
+      store.deleteTaskPermanently(taskId);
+      if (selectedTaskId === taskId) selectedTaskId = null;
+      tapMedium();
+    } });
+  } else {
+    const done = task.status === 'completed' || task.status === 'canceled';
+    items.push({
+      icon: done ? '↺' : '✓',
+      label: done ? 'Вернуть в активные' : 'Выполнить',
+      action: () => { store.toggleComplete(taskId); done ? tapLight() : tapSuccess(); },
+    });
+    if (!done) {
+      items.push({ sep: true });
+      // notifiedOn сбрасываем вместе с датой, иначе перенесённая задача не напомнит о себе заново
+      const setWhen = when => { store.updateTask(taskId, { when, notifiedOn: null, lastNotifiedAt: null }); tapLight(); };
+      items.push({ icon: '☀', label: 'Сегодня', action: () => setWhen('today') });
+      items.push({ icon: '📆', label: 'Завтра', action: () => setWhen(addDays(todayStr(), 1)) });
+      items.push({ icon: '🌙', label: 'Этим вечером', action: () => setWhen('evening') });
+      items.push({ icon: '🌒', label: 'Когда-нибудь', action: () => setWhen('someday') });
+      items.push({ icon: '≡', label: 'Без даты', action: () => setWhen(null) });
+    }
+    items.push({ sep: true });
+    items.push({ icon: '⧉', label: 'Дублировать', action: () => { const c = store.duplicateTask(taskId); if (c) { selectedTaskId = c.id; renderAll(); } } });
+    items.push({ icon: '🗑', label: 'Удалить в корзину', danger: true, action: () => {
+      store.trashTask(taskId);
+      if (selectedTaskId === taskId) selectedTaskId = null;
+      tapMedium();
+      showToast('Задача удалена', () => store.restoreTask(taskId));
+    } });
+  }
 
   menu.innerHTML = items.map((it, i) => it.sep
     ? `<div class="ctx-sep"></div>`
@@ -1589,9 +1665,17 @@ function openContextMenu(taskId, x, y) {
     });
   });
 
+  // На узком экране меню показывается шторкой снизу — там его удобнее достать
+  // большим пальцем, чем всплывающим окошком под точкой касания.
+  menu.hidden = false;
+  if (window.matchMedia('(max-width: 700px)').matches) {
+    menu.style.left = menu.style.top = '';
+    menu.style.visibility = '';
+    return;
+  }
+
   // измеряем скрытым, иначе меню на кадр вспыхивает на прошлой позиции
   menu.style.visibility = 'hidden';
-  menu.hidden = false;
   const rect = menu.getBoundingClientRect();
   const maxX = window.innerWidth - rect.width - 8;
   const maxY = window.innerHeight - rect.height - 8;
@@ -1670,6 +1754,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   bindSidebarSwipe($('#app'), $('.sidebar'), $('#sidebarScrim'));
 
+  bindKeyboardInset();
   $('#btnQuickAdd').addEventListener('click', openQuickAdd);
   $('#btnFab').addEventListener('click', openQuickAdd);
   $('#quickAddSubmit').addEventListener('click', submitQuickAdd);

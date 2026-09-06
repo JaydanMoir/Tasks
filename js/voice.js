@@ -45,12 +45,11 @@ export function createVoiceInput({ lang = 'ru-RU', onInterim, onFinal, onState, 
     onState?.(active);
   };
 
-  // Страховка: если onend по какой-то причине не придёт, микрофон остался бы
-  // занятым — в статус-баре iOS так и горела бы оранжевая точка. Через минуту
-  // молчания глушим принудительно.
+  // Страховка на случай, когда финальный результат так и не пришёл: без неё
+  // микрофон остаётся занятым, а в островке горит оранжевая точка.
   const armWatchdog = () => {
     clearTimeout(watchdog);
-    watchdog = setTimeout(() => cancel(), 60000);
+    watchdog = setTimeout(() => cancel(), 20000);
   };
 
   // stop() даёт распознаванию доучесть услышанное и вернуть последний кусок.
@@ -87,9 +86,16 @@ export function createVoiceInput({ lang = 'ru-RU', onInterim, onFinal, onState, 
         if (r.isFinal) final += r[0].transcript;
         else interim += r[0].transcript;
       }
+      if (final) {
+        onFinal?.(normalizeSpeech(final));
+        // iOS не присылает onend сам: с continuous=false сеанс всё равно висит,
+        // и микрофон остаётся захваченным до сворачивания приложения. Текст уже
+        // получен — обрываем не дожидаясь.
+        cancel();
+        return;
+      }
       armWatchdog();
-      if (final) onFinal?.(normalizeSpeech(final));
-      else if (interim) onInterim?.(interim.trim());
+      if (interim) onInterim?.(interim.trim());
     };
 
     rec.onerror = (e) => {

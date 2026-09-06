@@ -1657,7 +1657,10 @@ select.detail-select {
 
 /* ---- отклик на нажатие ----
    :hover на телефоне не срабатывает, и без этого касание выглядит как промах */
-.task-row:active,
+/* :not(.swiping) обязателен: --row-selected полупрозрачен, и во время свайпа
+   он перебивал непрозрачный фон едущей строки — сквозь неё просвечивали
+   сразу обе подложки, зелёная и красная */
+.task-row:not(.swiping):active,
 .nav-item:active,
 .tree-item:active,
 .ctx-item:active { background: var(--row-selected); }
@@ -1762,3 +1765,190 @@ select.detail-select {
   .detail-actions { margin-top: 32px; margin-bottom: 8px; }
   .detail-btn { font-size: 16px; padding: 15px 16px; }
 }
+
+/* Высота, закрытая экранной клавиатурой; выставляется из JS по visualViewport */
+:root { --keyboard-inset: 0px; }
+
+@media (max-width: 700px) {
+  /* Окно прижато к низу, поэтому клавиатура закрывала кнопку «Добавить»
+     и быстрые чипы дат. Поднимаем его на закрытую высоту. */
+  .modal-overlay { padding-bottom: var(--keyboard-inset); }
+  .modal {
+    max-height: calc(100dvh - var(--keyboard-inset) - 24px);
+    overflow-y: auto;
+    transition: max-height 0.2s ease;
+  }
+  /* Шторка выбора даты и времени — та же история */
+  .picker-overlay { padding-bottom: var(--keyboard-inset); }
+}
+
+/* ==================== Карточка задачи: секции-карточки ====================
+   Была плоская простыня из подписей и полей на белом. Теперь каждая секция —
+   отдельная карточка на подложке, а поля внутри — заливка без собственных
+   рамок: рамка в рамке читается как мусор. */
+
+.detail-head-card,
+.detail-section {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 var(--glass-edge);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.detail-head-card { padding-bottom: 8px; }
+.detail-head-card .detail-title-input,
+.detail-head-card .detail-notes-input { margin-bottom: 6px; }
+
+/* подпись секции — заголовком внутри карточки */
+.detail-section > .detail-label:first-child { margin-top: 0; }
+
+/* поля внутри карточки: заливка вместо обводки */
+.detail-section select.detail-select,
+.detail-section .date-field {
+  border: 1px solid transparent;
+  background: var(--field-fill);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-radius: 10px;
+}
+.detail-section select.detail-select:hover,
+.detail-section .date-field:hover { border-color: var(--glass-border); }
+
+:root { --field-fill: rgba(18, 24, 44, 0.045); }
+@media (prefers-color-scheme: dark) {
+  :root { --field-fill: rgba(255, 255, 255, 0.07); }
+}
+
+/* Приоритет: цветные пилюли различимы и в неактивном виде — иначе непонятно,
+   какая из них что означает, пока не ткнёшь. */
+.priority-opt { background: var(--field-fill); }
+.priority-opt.p1 { color: var(--accent); }
+.priority-opt.p2 { color: #b96a1d; }
+.priority-opt.p3 { color: var(--danger); }
+.priority-opt.active { color: #fff; }
+@media (prefers-color-scheme: dark) {
+  .priority-opt.p2 { color: #e0a05a; }
+}
+
+.detail-checkbox-row { margin-top: 10px; }
+.checklist-item input[type=text] { background: transparent; }
+
+/* Действия внизу уже карточка — выравниваем отступ с остальными секциями */
+.detail-actions { margin-bottom: 12px; }
+
+@media (max-width: 700px) {
+  #app.detail-open .detail-panel { padding-left: 14px; padding-right: 14px; }
+  .detail-head-card, .detail-section { padding: 16px; margin-bottom: 14px; }
+  .detail-panel-header { margin-left: -14px; margin-right: -14px; padding-left: 14px; padding-right: 14px; }
+}
+
+/* ==================== Контекстное меню шторкой на телефоне ==================== */
+@media (max-width: 700px) {
+  .context-menu {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    min-width: 0;
+    border-radius: 20px 20px 0 0;
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+    box-shadow: inset 0 1px 0 var(--glass-edge), 0 -10px 40px rgba(20, 28, 54, 0.22);
+  }
+  .ctx-item { padding: 14px 12px; font-size: 16px; border-radius: 12px; }
+  .ctx-icon { width: 24px; font-size: 17px; }
+  .ctx-sep { margin: 6px 8px; }
+}
+
+/* Приоритет — сегментированный переключатель: четыре пилюли в строку не влезали
+   и «Высокий» уезжал на вторую, что выглядело поломкой. Равные доли решают это
+   и заодно дают привычный по iOS вид. */
+.priority-picker { flex-wrap: nowrap; gap: 6px; }
+.priority-opt {
+  flex: 1;
+  text-align: center;
+  min-width: 0;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+@media (max-width: 700px) {
+  .priority-opt { font-size: 13.5px; padding: 9px 4px; }
+}
+
+/* ==================== Удержание: без системного выделения ====================
+   Долгое нажатие на строку открывает наше меню, но iOS параллельно запускала
+   своё: выделяла слово и показывала «Copy | Look Up | Translate» поверх.
+   Строка задачи — не текст для копирования, а элемент управления. */
+.task-row,
+.cal-cell,
+.nav-item,
+.tree-item,
+.ctx-item,
+.priority-opt,
+.quick-chip,
+.cal-sheet-day,
+.tag-pill {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+/* поля ввода внутри обязаны остаться выделяемыми */
+.task-row input,
+.task-row textarea,
+.task-row [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ==================== Карточка задачи: плотнее ====================
+   Девять секций с крупными полями и отступами превращали короткую форму в
+   долгую прокрутку. Ужимаем воздух, не трогая размеры самих элементов
+   управления — по ним всё ещё надо попадать пальцем. */
+@media (max-width: 700px) {
+  #app.detail-open .detail-panel { padding-left: 12px; padding-right: 12px; }
+  .detail-panel-header {
+    margin-left: -12px;
+    margin-right: -12px;
+    padding-left: 12px;
+    padding-right: 12px;
+    margin-bottom: 8px;
+  }
+
+  .detail-head-card,
+  .detail-section {
+    padding: 12px;
+    margin-bottom: 9px;
+    border-radius: 14px;
+  }
+  .detail-head-card { padding-bottom: 6px; }
+
+  .detail-label { font-size: 11.5px; margin-bottom: 5px; }
+  .detail-section { margin-bottom: 9px; }
+  .detail-notes-input { min-height: 44px; margin-bottom: 2px; }
+  .detail-title-input { margin-bottom: 4px; }
+
+  select.detail-select { padding: 9px 10px; }
+  .date-field { min-height: 38px; padding-top: 6px; padding-bottom: 6px; }
+  .priority-opt { padding: 8px 4px; }
+  .checklist-item { padding: 5px 0; }
+
+  .detail-actions { margin-top: 14px; margin-bottom: 10px; }
+  .detail-btn { padding: 13px 14px; }
+}
+
+/* Подзаголовок внутри объединённой карточки: отделяет «Дедлайн» от «Когда»,
+   но не заводит ради этого отдельную карточку. */
+.detail-label-sub { margin-top: 12px; }
+@media (max-width: 700px) { .detail-label-sub { margin-top: 10px; } }
+
+/* Пока строку тянут, фон должен становиться непрозрачным мгновенно: за 0,1 с
+   перехода подложки успевают мигнуть сквозь полупрозрачную строку. */
+.task-row.swiping { transition: none; }
+
+/* Двойное касание в WebKit масштабирует страницу. В приложении это не жест
+   пользователя, а помеха: тапнул дважды по задаче — экран уехал.
+   manipulation отключает именно двойной тап, оставляя прокрутку и щипок. */
+html { touch-action: manipulation; }
