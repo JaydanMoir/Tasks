@@ -891,7 +891,6 @@ function renderDetail() {
           <option value="240" ${task.reminderRepeatMinutes === 240 ? 'selected' : ''}>Каждые 4 часа</option>
         </select>
       </div>
-    </div>
 
       <div class="detail-label detail-label-sub">Дедлайн</div>
       ${dateFieldHtml('detDeadline', task.deadline, 'Без дедлайна', '🏁')}
@@ -1532,6 +1531,31 @@ function closePalette() {
   $('#paletteOverlay').classList.remove('open');
 }
 
+// ---------------- Тема оформления ----------------
+// По умолчанию следуем системе. Явный выбор пишем атрибутом на корне — CSS
+// разводит три состояния: системное, принудительно светлое и принудительно тёмное.
+const THEME_KEY = 'tasksApp.theme';
+
+function currentTheme() {
+  try { return localStorage.getItem(THEME_KEY) || 'system'; } catch (_) { return 'system'; }
+}
+
+function applyTheme(theme) {
+  const root = document.documentElement;
+  if (theme === 'system') root.removeAttribute('data-theme');
+  else root.setAttribute('data-theme', theme);
+  const order = ['system', 'light', 'dark'];
+  $$('.theme-opt').forEach(el => el.classList.toggle('active', el.dataset.themeSet === theme));
+  // позицию бегунка отдаём в CSS числом — так анимация остаётся его заботой
+  $$('.theme-switch').forEach(el => el.style.setProperty('--theme-index', Math.max(0, order.indexOf(theme))));
+}
+
+function setTheme(theme) {
+  try { localStorage.setItem(THEME_KEY, theme); } catch (_) { /* переживём */ }
+  applyTheme(theme);
+  tapLight();
+}
+
 // ---------------- Notifications ----------------
 // закрытие баннера запоминаем — иначе он возвращается при каждой перезагрузке
 const NOTIF_DISMISS_KEY = 'tasksApp.notifBannerDismissed';
@@ -1657,6 +1681,40 @@ function hideToast() {
   clearTimeout(toastTimer);
 }
 
+// Удержание на свободном месте списка. Строки обрабатывают жест сами, поэтому
+// касания по ним сюда не доходят.
+function bindListLongPress(listEl) {
+  let timer = null, sx = 0, sy = 0;
+  const cancel = () => { clearTimeout(timer); timer = null; };
+
+  listEl.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || e.target.closest('.task-row')) return;
+    sx = e.touches[0].clientX;
+    sy = e.touches[0].clientY;
+    cancel();
+    timer = setTimeout(() => {
+      timer = null;
+      tapMedium();
+      openListMenu(sx, sy);
+    }, 480);
+  }, { passive: true });
+
+  // прокрутка списка не должна оборачиваться меню
+  listEl.addEventListener('touchmove', (e) => {
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - sx) > 6 || Math.abs(t.clientY - sy) > 6) cancel();
+  }, { passive: true });
+  listEl.addEventListener('touchend', cancel);
+  listEl.addEventListener('touchcancel', cancel);
+
+  // на настольном экране тот же набор — по правому клику
+  listEl.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.task-row')) return;
+    e.preventDefault();
+    openListMenu(e.clientX, e.clientY);
+  });
+}
+
 // ---------------- Task context menu ----------------
 let contextMenuTaskId = null;
 function closeContextMenu() {
@@ -1707,6 +1765,13 @@ function openContextMenu(taskId, x, y) {
     } });
   }
 
+  showMenu(items, x, y);
+}
+
+// Отрисовка и размещение — общие: меню задачи и меню пустого места списка
+// отличаются только набором пунктов.
+function showMenu(items, x, y) {
+  const menu = $('#taskContextMenu');
   menu.innerHTML = items.map((it, i) => it.sep
     ? `<div class="ctx-sep"></div>`
     : `<div class="ctx-item ${it.danger ? 'danger' : ''}" data-ctx-idx="${i}"><span class="ctx-icon">${it.icon}</span><span>${esc(it.label)}</span></div>`
@@ -1737,6 +1802,33 @@ function openContextMenu(taskId, x, y) {
   menu.style.left = Math.max(8, Math.min(x, maxX)) + 'px';
   menu.style.top = Math.max(8, Math.min(y, maxY)) + 'px';
   menu.style.visibility = '';
+}
+
+// Меню по удержанию на пустом месте списка. Отдельная кнопка «отменить» жила
+// только в тосте и пропадала через несколько секунд — вернуть случайно закрытую
+// задачу после этого было нечем, кроме похода в корзину или журнал.
+function openListMenu(x, y) {
+  const { trashed, completed } = store.lastRemoved();
+  const short = (t) => (t.length > 26 ? t.slice(0, 25) + '…' : t);
+  const items = [];
+
+  if (trashed) {
+    items.push({ icon: '↺', label: `Вернуть: ${short(trashed.title)}`, action: () => {
+      store.restoreTask(trashed.id);
+      tapLight();
+      showToast('Задача возвращена');
+    } });
+  }
+  if (completed) {
+    items.push({ icon: '○', label: `Снять отметку: ${short(completed.title)}`, action: () => {
+      store.toggleComplete(completed.id);
+      tapLight();
+    } });
+  }
+  if (items.length) items.push({ sep: true });
+  items.push({ icon: '+', label: 'Новая задача', action: openQuickAdd });
+
+  showMenu(items, x, y);
 }
 
 // ---------------- Global render ----------------
@@ -1780,6 +1872,9 @@ document.addEventListener('DOMContentLoaded', () => {
   seedIfEmpty();
   renderAll();
 
+  applyTheme(currentTheme());
+  $$('.theme-opt').forEach(el => el.addEventListener('click', () => setTheme(el.dataset.themeSet)));
+
   updateNotifBanner();
   const btnEnableNotif = $('#btnEnableNotif');
   if (btnEnableNotif) btnEnableNotif.addEventListener('click', requestNotifPermission);
@@ -1797,6 +1892,8 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(fireReminderNotifications, 2000);
     setInterval(fireReminderNotifications, 20000);
   }
+
+  bindListLongPress($('#taskList'));
 
   $('#btnMenu').addEventListener('click', () => $('#app').classList.toggle('sidebar-open'));
   $('#sidebarScrim').addEventListener('click', closeMobileSidebar);

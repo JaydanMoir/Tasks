@@ -54,6 +54,34 @@
       <button class="sidebar-add-btn" id="btnImport" title="Загрузить данные из файла резервной копии">⬆ Импорт</button>
       <input type="file" id="importFile" accept="application/json" hidden>
     </div>
+
+    <div class="theme-row">
+      <span class="theme-row-label">Оформление</span>
+      <div class="theme-switch" role="group" aria-label="Оформление">
+        <!-- Бегунок отдельным элементом: подсветка активного через фон не умеет
+             ездить, а именно движение и читается как переключатель. -->
+        <span class="theme-thumb" aria-hidden="true"></span>
+        <button type="button" class="theme-opt" data-theme-set="system" title="Как в системе" aria-label="Как в системе">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M8 1.8a6.2 6.2 0 000 12.4z" fill="currentColor"/>
+          </svg>
+        </button>
+        <button type="button" class="theme-opt" data-theme-set="light" title="Светлая" aria-label="Светлая тема">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <circle cx="8" cy="8" r="3.2" fill="currentColor"/>
+            <g stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+              <path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3.1 3.1l1.1 1.1M11.8 11.8l1.1 1.1M12.9 3.1l-1.1 1.1M4.2 11.8l-1.1 1.1"/>
+            </g>
+          </svg>
+        </button>
+        <button type="button" class="theme-opt" data-theme-set="dark" title="Тёмная" aria-label="Тёмная тема">
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+            <path d="M13.4 10.3A5.8 5.8 0 015.7 2.6a5.9 5.9 0 107.7 7.7z" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
+    </div>
   </aside>
 
   <!-- Main list -->

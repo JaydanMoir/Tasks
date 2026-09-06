@@ -271,6 +271,9 @@ class Store {
     const t = this.state.tasks[id];
     if (!t) return;
     t.status = 'trashed';
+    // время удаления нужно, чтобы находить последнюю выброшенную задачу:
+    // порядок в корзине по нему, а не по дате создания
+    t.trashedAt = Date.now();
     this.save();
   }
 
@@ -278,7 +281,22 @@ class Store {
     const t = this.state.tasks[id];
     if (!t) return;
     t.status = 'active';
+    t.trashedAt = null;
     this.save();
+  }
+
+  // Последнее, что пользователь убрал с глаз: удалил или отметил выполненным.
+  // Нужно для возврата случайно закрытой задачи из меню пустого места списка.
+  lastRemoved() {
+    let trashed = null, completed = null;
+    Object.values(this.state.tasks).forEach(t => {
+      if (t.status === 'trashed' && t.trashedAt) {
+        if (!trashed || t.trashedAt > trashed.trashedAt) trashed = t;
+      } else if (t.status === 'completed' && t.completedAt) {
+        if (!completed || t.completedAt > completed.completedAt) completed = t;
+      }
+    });
+    return { trashed, completed };
   }
 
   duplicateTask(id) {

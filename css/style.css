@@ -24,8 +24,7 @@
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+@media (prefers-color-scheme: dark) {:root:not([data-theme="light"]) {
     --bg-sidebar: #202124;
     --bg-main: #1c1d1f;
     --bg-detail: #232427;
@@ -160,7 +159,7 @@ html, body {
   border-radius: 6px;
   color: var(--text-tertiary);
 }
-@media (prefers-color-scheme: dark) { .search-box { background: rgba(255,255,255,0.06); } }
+@media (prefers-color-scheme: dark) {:root:not([data-theme="light"]) .search-box { background: rgba(255,255,255,0.06); } }
 .search-box input {
   border: none;
   background: transparent;
@@ -851,7 +850,7 @@ select.detail-select {
 
 ::-webkit-scrollbar { width: 9px; }
 ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 5px; }
-@media (prefers-color-scheme: dark) { ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); } }
+@media (prefers-color-scheme: dark) {:root:not([data-theme="light"]) ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); } }
 
 /* ================= Барабанный выбор даты и времени (iOS-стиль) ================= */
 
@@ -1189,10 +1188,7 @@ body.picker-open { overflow: hidden; }
 .parse-chip.p2 { background: rgba(217,130,43,0.16); color: #b96a1d; }
 .parse-chip.p3 { background: rgba(224,71,62,0.14); color: var(--danger); }
 
-@media (prefers-color-scheme: dark) {
-  .parse-chip.time { color: #e0a05a; }
-  .parse-chip.tag  { color: #b49ae8; }
-  .parse-chip.p2   { color: #e0a05a; }
+@media (prefers-color-scheme: dark) {:root:not([data-theme="light"]) .parse-chip.time { color: #e0a05a; }:root:not([data-theme="light"]) .parse-chip.tag { color: #b49ae8; }:root:not([data-theme="light"]) .parse-chip.p2 { color: #e0a05a; }
 }
 
 .quick-chips {
@@ -1526,8 +1522,7 @@ body.picker-open { overflow: hidden; }
   --tint-c: rgba(138, 111, 212, 0.10);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+@media (prefers-color-scheme: dark) {:root:not([data-theme="light"]) {
     --glass-bg: rgba(32, 33, 38, 0.60);
     --glass-bg-strong: rgba(32, 33, 38, 0.82);
     --glass-border: rgba(255, 255, 255, 0.10);
@@ -1818,8 +1813,7 @@ select.detail-select {
 .detail-section .date-field:hover { border-color: var(--glass-border); }
 
 :root { --field-fill: rgba(18, 24, 44, 0.045); }
-@media (prefers-color-scheme: dark) {
-  :root { --field-fill: rgba(255, 255, 255, 0.07); }
+@media (prefers-color-scheme: dark) {:root:not([data-theme="light"]) { --field-fill: rgba(255, 255, 255, 0.07); }
 }
 
 /* Приоритет: цветные пилюли различимы и в неактивном виде — иначе непонятно,
@@ -1829,8 +1823,7 @@ select.detail-select {
 .priority-opt.p2 { color: #b96a1d; }
 .priority-opt.p3 { color: var(--danger); }
 .priority-opt.active { color: #fff; }
-@media (prefers-color-scheme: dark) {
-  .priority-opt.p2 { color: #e0a05a; }
+@media (prefers-color-scheme: dark) {:root:not([data-theme="light"]) .priority-opt.p2 { color: #e0a05a; }
 }
 
 .detail-checkbox-row { margin-top: 10px; }
@@ -1954,7 +1947,7 @@ select.detail-select {
 html { touch-action: manipulation; }
 
 .parse-chip.lead { background: rgba(63,174,90,0.16); color: #2f8f47; }
-@media (prefers-color-scheme: dark) { .parse-chip.lead { color: #6ec982; } }
+@media (prefers-color-scheme: dark) {:root:not([data-theme="light"]) .parse-chip.lead { color: #6ec982; } }
 
 /* Поле «напомнить за» переехало в нижнюю строку окна быстрого добавления:
    отдельной строкой оно выпрыгивало посреди набора и сдвигало всё под ним. */
@@ -2045,4 +2038,134 @@ html { touch-action: manipulation; }
   .cal-count.urgent { background: var(--danger); color: #fff; }
 
   .cal-daynum { width: 30px; height: 30px; font-size: 15px; }
+}
+
+
+/* ═══════════════ Ручной выбор темы ═══════════════
+   Правила выше действуют, пока тема следует системе. Здесь тот же набор,
+   но по явному признаку на корне — иначе выбор «тёмная» на светлом телефоне
+   не срабатывал бы вовсе. */
+
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] {
+    --bg-sidebar: #202124;
+    --bg-main: #1c1d1f;
+    --bg-detail: #232427;
+    --text-primary: #f0f0f2;
+    --text-secondary: #9a9aa2;
+    --text-tertiary: #6f7075;
+    --border: #313235;
+    --row-hover: rgba(255,255,255,0.04);
+    --row-selected: rgba(74,125,252,0.18);
+    --checkbox-border: #55565c;
+    --shadow: 0 1px 4px rgba(0,0,0,0.4);
+    --tag-bg: #2d2e32;
+    --tag-text: #b7b8bd;
+    color-scheme: dark;
+  }
+
+:root[data-theme="dark"] .search-box { background: rgba(255,255,255,0.06); } 
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); } 
+:root[data-theme="dark"] .parse-chip.time { color: #e0a05a; }:root[data-theme="dark"] .parse-chip.tag { color: #b49ae8; }:root[data-theme="dark"] .parse-chip.p2 { color: #e0a05a; }
+
+:root[data-theme="dark"] {
+    --glass-bg: rgba(32, 33, 38, 0.60);
+    --glass-bg-strong: rgba(32, 33, 38, 0.82);
+    --glass-border: rgba(255, 255, 255, 0.10);
+    --glass-edge: rgba(255, 255, 255, 0.14);
+    --glass-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+    --glass-scrim: rgba(0, 0, 0, 0.42);
+    --tint-a: rgba(74, 125, 252, 0.22);
+    --tint-b: rgba(217, 130, 43, 0.12);
+    --tint-c: rgba(138, 111, 212, 0.14);
+  }
+
+:root[data-theme="dark"] { --field-fill: rgba(255, 255, 255, 0.07); }
+
+:root[data-theme="dark"] .priority-opt.p2 { color: #e0a05a; }
+
+:root[data-theme="dark"] .parse-chip.lead { color: #6ec982; } 
+/* ---- переключатель темы в подвале бокового меню ---- */
+/* Стоит последним в меню и намеренно тише всего остального: тему выбирают
+   один раз, а лезть в глаза при каждом открытии меню она не должна. */
+.theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  /* поля как у ряда кнопок ниже — чтобы подпись встала ровно над «Экспорт» */
+  margin: 0 8px 4px;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  opacity: 0.62;
+  transition: opacity 0.18s ease;
+}
+.theme-row:hover,
+.theme-row:focus-within { opacity: 1; }
+/* Ширина повторяет кнопку с flex:1 при зазоре 6px — половина минус половина
+   зазора. Просто flex:1 здесь не годится: переключатель уже кнопки «Импорт»,
+   и подпись расползлась бы на остаток, уехав центром вправо. */
+.theme-row-label {
+  width: calc(50% - 3px);
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.theme-switch { margin-left: auto; }
+
+.theme-switch {
+  --theme-index: 0;
+  position: relative;
+  display: flex;
+  padding: 3px;
+  border-radius: 11px;
+  background: var(--field-fill);
+  flex-shrink: 0;
+}
+/* Бегунок едет под иконками, поэтому лежит ниже них по слою. */
+.theme-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 3);
+  border-radius: 8px;
+  background: var(--bg-main);
+  box-shadow: var(--shadow);
+  transform: translateX(calc(var(--theme-index) * 100%));
+  transition: transform 0.24s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.theme-opt {
+  position: relative;
+  z-index: 1;
+  width: 31px;
+  height: 25px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.18s ease;
+}
+.theme-opt:hover { color: var(--text-secondary); }
+.theme-opt.active { color: var(--accent); }
+
+@media (prefers-reduced-motion: reduce) { .theme-thumb { transition: none; } }
+@media (max-width: 700px) {
+  /* Полный отступ под домашний индикатор (34pt) оставлял заметную пустоту.
+     Урезаем его примерно вдвое: строка опускается ниже, но её кнопки всё ещё
+     не попадают в полосу, где системный свайп вверх перехватывает касание. */
+  .theme-row {
+    margin: 0 8px max(6px, calc(env(safe-area-inset-bottom, 0px) - 18px));
+    padding-top: 5px;
+  }
+  .theme-row-label { font-size: 13px; }
+  .theme-opt { width: 38px; height: 32px; }
 }
