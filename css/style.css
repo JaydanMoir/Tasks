@@ -1955,3 +1955,58 @@ html { touch-action: manipulation; }
 
 .parse-chip.lead { background: rgba(63,174,90,0.16); color: #2f8f47; }
 @media (prefers-color-scheme: dark) { .parse-chip.lead { color: #6ec982; } }
+
+/* Поле «напомнить за» переехало в нижнюю строку окна быстрого добавления:
+   отдельной строкой оно выпрыгивало посреди набора и сдвигало всё под ним. */
+.quick-add-row .quick-add-lead {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 6px;
+  background: var(--bg-main);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+}
+.quick-add-row .quick-add-lead[hidden] { display: none; }
+@media (max-width: 640px) {
+  .quick-add-row .quick-add-lead { min-height: 40px; font-size: 16px; }
+}
+
+/* Нижний блок окна быстрого добавления на телефоне — сетка 2×2.
+   При переносе по flex элементы вставали как придётся: «Сегодня» занимала
+   всю строку, «Добавить» оставалась одна внизу, а поле напоминания обрезалось. */
+@media (max-width: 640px) {
+  .quick-add-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    align-items: stretch;
+  }
+  .quick-add-row select,
+  .quick-add-row .quick-add-lead,
+  .quick-add-row button {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    margin: 0;
+  }
+  /* без поля напоминания кнопке незачем ютиться в половине ширины */
+  .quick-add-row:has(.quick-add-lead[hidden]) #quickAddSubmit { grid-column: 1 / -1; }
+}
+
+/* Дата стоит в сетке нижнего блока наравне со списками — значит и выглядеть
+   должна как они, и обрезаться многоточием, а не распирать ячейку. */
+.quick-add-row #quickAddWhenDate {
+  margin: 0;
+  font-size: 14px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.quick-add-row #quickAddWhenDate[hidden] { display: none; }
+@media (max-width: 640px) {
+  .quick-add-row #quickAddWhenDate { min-height: 44px; font-size: 15px; }
+}

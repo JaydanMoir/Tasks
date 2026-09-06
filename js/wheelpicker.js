@@ -241,7 +241,7 @@ export function openDatePicker({ value, title = 'Дата', allowClear = false, 
         <button type="button" class="cal-sheet-chip" data-jump="today">Сегодня</button>
         <button type="button" class="cal-sheet-chip" data-jump="tomorrow">Завтра</button>
         <button type="button" class="cal-sheet-chip" data-jump="weekend">Выходные</button>
-        <button type="button" class="cal-sheet-chip" data-jump="week">Через неделю</button>
+        <button type="button" class="cal-sheet-chip" data-jump="week">+7 дней</button>
       </div>
 
       <div class="cal-sheet-nav">

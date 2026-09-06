@@ -109,17 +109,16 @@
     <div class="quick-chips" id="quickAddQuickChips">
       <button type="button" class="quick-chip" data-when="today">Сегодня</button>
       <button type="button" class="quick-chip" data-when="tomorrow">Завтра</button>
-      <button type="button" class="quick-chip" data-when="evening">Вечером</button>
       <button type="button" class="quick-chip" data-when="weekend">Выходные</button>
       <button type="button" class="quick-chip" data-when="pick">Дата…</button>
     </div>
 
-    <!-- появляется, только когда во вводе распознано время -->
-    <select id="quickAddLead" class="quick-add-lead" hidden></select>
-
     <input type="text" id="quickAddNotes" placeholder="Заметки" autocomplete="off">
-    <button type="button" id="quickAddWhenDate" class="date-field empty" data-value="" hidden>📅 Выбрать дату</button>
     <div class="quick-add-row">
+      <!-- Поле даты стоит в сетке, а не отдельной строкой сверху: выбранная дата
+           добавляла окну третий этаж. Когда она задана, список «когда» прячется —
+           он всё равно показывал бы только «Дата…», что кнопка говорит лучше. -->
+      <button type="button" id="quickAddWhenDate" class="date-field empty" data-value="" hidden>📅 Выбрать дату</button>
       <select id="quickAddWhen">
         <option value="">Не запланировано</option>
         <option value="today">Сегодня</option>
@@ -130,6 +129,9 @@
       <select id="quickAddProject">
         <option value="">Входящие</option>
       </select>
+      <!-- Стоит здесь, а не отдельной строкой выше: там оно появлялось прямо
+           во время набора и толкало вниз заметки и кнопку «Добавить». -->
+      <select id="quickAddLead" class="quick-add-lead" hidden></select>
       <button id="quickAddSubmit">Добавить</button>
     </div>
     <div class="quick-add-hint">Можно писать сразу: «позвонить маме завтра в 18:00 !2 #дом»</div>

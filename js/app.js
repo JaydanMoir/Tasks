@@ -879,7 +879,7 @@ function renderDetail() {
         <div class="detail-label" style="margin-top:8px;">Напоминание</div>
         ${dateFieldHtml('detReminderTime', task.reminderTime, 'Без напоминания', '⏰')}
         <select class="detail-select" id="detReminderLead" style="margin-top:6px; ${task.reminderTime ? '' : 'display:none'}">
-          <option value="" ${!task.reminderLeadMinutes ? 'selected' : ''}>Не напоминать заранее</option>
+          <option value="" ${!task.reminderLeadMinutes ? 'selected' : ''}>Напомнить вовремя</option>
           ${leadOptionsFor(task.reminderLeadMinutes).map(o => `<option value="${o.value}" ${task.reminderLeadMinutes === o.value ? 'selected' : ''}>Напомнить за ${o.label}</option>`).join('')}
         </select>
         <select class="detail-select" id="detReminderRepeat" style="margin-top:6px; ${task.reminderTime ? '' : 'display:none'}">
@@ -1283,6 +1283,7 @@ function renderQuickAddParse() {
     }
     syncQuickChipState();
   }
+  syncQuickAddDateSlot();
 
   // «Напомнить за» имеет смысл только при заданном времени — иначе не от чего отсчитывать
   const leadSel = $('#quickAddLead');
@@ -1298,8 +1299,11 @@ function renderQuickAddParse() {
     }
     const signature = String(quickAddParsed.lead || '');
     if (leadSel.dataset.filled !== signature) {
-      leadSel.innerHTML = `<option value="">Не напоминать заранее</option>` +
-        opts.map(o => `<option value="${o.value}">Напомнить за ${o.label}</option>`).join('');
+      // подписи короткие: поле теперь делит строку с «когда» и «куда»
+      // «не заранее» читалось как «не уведомлять вовсе», хотя напоминание
+      // в назначенное время всё равно придёт — просто без запаса
+      leadSel.innerHTML = `<option value="">🔔 вовремя</option>` +
+        opts.map(o => `<option value="${o.value}">🔔 за ${o.label}</option>`).join('');
       leadSel.dataset.filled = signature;
       leadSel.value = quickAddParsed.lead ? String(quickAddParsed.lead) : '';
     }
@@ -1340,13 +1344,10 @@ function setQuickChip(kind) {
   } else if (kind === 'pick') {
     sel.value = 'date';
     $('#quickAddWhenDate').hidden = false;
-    openDatePicker({
-      value: $('#quickAddWhenDate').dataset.value || todayStr(),
-      title: 'Когда',
-      onPick: (d) => d && setQuickAddDate(d),
-    });
+    openQuickAddDatePicker();
   }
   syncQuickChipState();
+  syncQuickAddDateSlot();
   renderQuickAddParse();
 }
 
@@ -1371,6 +1372,34 @@ function closeQuickAdd() {
   $('#quickAddOverlay').classList.remove('open');
 }
 // Поле даты в быстром добавлении: значение живёт в data-value, подпись — человекочитаемая
+// Дата и список «когда» делят одну ячейку сетки: показываем что-то одно.
+function syncQuickAddDateSlot() {
+  $('#quickAddWhen').hidden = !$('#quickAddWhenDate').hidden;
+}
+
+// Один вход для всех трёх мест, откуда открывается календарь. Раньше они
+// расходились: из одного дату можно было выбрать, но не снять.
+function openQuickAddDatePicker() {
+  openDatePicker({
+    value: $('#quickAddWhenDate').dataset.value || todayStr(),
+    title: 'Когда',
+    allowClear: true,
+    clearLabel: 'Без даты',
+    onPick: (d) => {
+      if (d) {
+        setQuickAddDate(d);
+        $('#quickAddWhenDate').hidden = false;
+      } else {
+        $('#quickAddWhen').value = '';
+        setQuickAddDate(null);
+        $('#quickAddWhenDate').hidden = true;
+      }
+      syncQuickAddDateSlot();
+      syncQuickChipState();
+    },
+  });
+}
+
 function setQuickAddDate(value) {
   const el = $('#quickAddWhenDate');
   el.dataset.value = value || '';
@@ -1802,15 +1831,9 @@ document.addEventListener('DOMContentLoaded', () => {
     $('#quickAddWhenDate').hidden = !isDate;
     if (!isDate) return;
     if (!$('#quickAddWhenDate').dataset.value) setQuickAddDate(todayStr());
-    openDatePicker({ value: $('#quickAddWhenDate').dataset.value, title: 'Когда', onPick: (d) => d && setQuickAddDate(d) });
+    openQuickAddDatePicker();
   });
-  $('#quickAddWhenDate').addEventListener('click', () => {
-    openDatePicker({
-      value: $('#quickAddWhenDate').dataset.value || todayStr(),
-      title: 'Когда',
-      onPick: (d) => d && setQuickAddDate(d),
-    });
-  });
+  $('#quickAddWhenDate').addEventListener('click', openQuickAddDatePicker);
   $('#quickAddOverlay').addEventListener('click', (e) => { if (e.target.id === 'quickAddOverlay') closeQuickAdd(); });
   // Escape/Enter на всём окне: глобальный обработчик сюда не доходит, а раньше
   // обработчик висел только на поле названия — из «Заметок» окно было не закрыть
