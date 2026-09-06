@@ -8,6 +8,7 @@
 import { store, todayStr, isDateStr, formatLead } from './store.js?v=15';
 
 // У iOS жёсткий лимит: 64 ожидающих локальных уведомления на приложение.
+const IOS_PENDING_LIMIT = 64;
 // Держим запас — часть слотов уходит под «повторять каждые N минут».
 const MAX_SCHEDULED = 56;
 // «Повторять каждые N минут» — бесконечный по смыслу, но системе нужен конечный список
@@ -142,7 +143,7 @@ function entriesForTask(task, today) {
   return out;
 }
 
-export function buildSchedule() {
+export function buildSchedule(budget = MAX_SCHEDULED) {
   const today = todayStr();
   const all = [];
   store.allActiveTasks().forEach(task => {
@@ -153,7 +154,7 @@ export function buildSchedule() {
   });
   // при нехватке слотов жертвуем дальними — ближайшие срабатывания важнее
   all.sort((a, b) => a.sortAt - b.sortAt);
-  return all.slice(0, MAX_SCHEDULED).map(({ sortAt, ...n }) => n);
+  return all.slice(0, Math.max(0, budget)).map(({ sortAt, ...n }) => n);
 }
 
 // ---------------- синхронизация с системой ----------------
@@ -190,7 +191,12 @@ export async function syncSchedule() {
     if (stale.length) {
       await ln.cancel({ notifications: stale.map(n => ({ id: n.id })) });
     }
-    const notifications = buildSchedule();
+    // Отложенные вручную остаются висеть и тоже занимают слоты из тех же 64.
+    // Без этой поправки после десятка «отложить» система молча начала бы
+    // выбрасывать дальние напоминания — и они просто не пришли бы.
+    const kept = pending.notifications.length - stale.length;
+    const budget = Math.min(MAX_SCHEDULED, IOS_PENDING_LIMIT - kept - 2);
+    const notifications = buildSchedule(budget);
     if (notifications.length) await ln.schedule({ notifications });
   } catch (e) {
     console.error('Не удалось обновить расписание уведомлений', e);

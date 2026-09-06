@@ -1755,6 +1755,16 @@ function openContextMenu(taskId, x, y) {
       items.push({ icon: '🌒', label: 'Когда-нибудь', action: () => setWhen('someday') });
       items.push({ icon: '≡', label: 'Без даты', action: () => setWhen(null) });
     }
+    // Порядок меняли только перетаскиванием мышью — на телефоне это было
+    // недоступно вовсе. Показываем пункт лишь когда двигать действительно есть куда.
+    const up = canMoveTask(taskId, -1);
+    const down = canMoveTask(taskId, 1);
+    if (up || down) {
+      items.push({ sep: true });
+      if (up) items.push({ icon: '↑', label: 'Переместить выше', action: () => moveTask(taskId, -1) });
+      if (down) items.push({ icon: '↓', label: 'Переместить ниже', action: () => moveTask(taskId, 1) });
+    }
+
     items.push({ sep: true });
     items.push({ icon: '⧉', label: 'Дублировать', action: () => { const c = store.duplicateTask(taskId); if (c) { selectedTaskId = c.id; renderAll(); } } });
     items.push({ icon: '🗑', label: 'Удалить в корзину', danger: true, action: () => {
@@ -1804,11 +1814,65 @@ function showMenu(items, x, y) {
   menu.style.visibility = '';
 }
 
+// Перестановка задачи относительно соседа по экрану, а не по глобальному
+// массиву порядка: список сгруппирован, и «сосед сверху» в данных запросто
+// окажется в другой группе — тогда перестановка не даст видимого эффекта.
+// Границей служит заголовок группы: за неё не переносим, там правит дата.
+function neighbourLane(taskId, dir) {
+  const row = document.querySelector(`.task-row[data-id="${taskId}"]`);
+  const lane = row?.closest('.task-swipe');
+  if (!lane) return null;
+  const sib = dir < 0 ? lane.previousElementSibling : lane.nextElementSibling;
+  return sib?.classList?.contains('task-swipe') ? sib : null;
+}
+
+function canMoveTask(taskId, dir) {
+  return Boolean(neighbourLane(taskId, dir));
+}
+
+function moveTask(taskId, dir) {
+  const sib = neighbourLane(taskId, dir);
+  if (!sib) return;
+  if (dir < 0) {
+    store.reorderTask(taskId, sib.querySelector('.task-row').dataset.id);
+  } else {
+    // вниз — значит встать перед тем, кто идёт следом за соседом;
+    // если следом никого, задача уходит в конец своей группы
+    const after = sib.nextElementSibling?.classList?.contains('task-swipe')
+      ? sib.nextElementSibling.querySelector('.task-row').dataset.id
+      : null;
+    store.reorderTask(taskId, after);
+  }
+  tapLight();
+}
+
+// Относится ли задача к открытому сейчас экрану. Повторяет отбор, по которому
+// строится сам список: без этого меню возврата предлагало последнее удалённое
+// вообще — стоишь в «Скоро», а тебе возвращают задачу из «Сегодня».
+function taskFitsView(task, view) {
+  const today = todayStr();
+  switch (view.type) {
+    case 'inbox':    return Boolean(task.inInbox);
+    case 'today':    return !task.inInbox && (task.when === 'today' || task.when === 'evening'
+                       || (isDateStr(task.when) && task.when <= today));
+    case 'upcoming': return !task.inInbox && isDateStr(task.when) && task.when > today;
+    case 'someday':  return !task.inInbox && task.when === 'someday';
+    case 'anytime':  return !task.inInbox && !task.when;
+    case 'calendar': return isDateStr(task.when) || Boolean(task.deadline)
+                       || task.when === 'today' || task.when === 'evening';
+    case 'project':  return task.projectId === view.id;
+    case 'area':     return task.areaId === view.id;
+    case 'tag':      return (task.tags || []).includes(view.id);
+    // в журнале и корзине задачи и так на виду: там возврат живёт в меню строки
+    default:         return false;
+  }
+}
+
 // Меню по удержанию на пустом месте списка. Отдельная кнопка «отменить» жила
 // только в тосте и пропадала через несколько секунд — вернуть случайно закрытую
 // задачу после этого было нечем, кроме похода в корзину или журнал.
 function openListMenu(x, y) {
-  const { trashed, completed } = store.lastRemoved();
+  const { trashed, completed } = store.lastRemoved(task => taskFitsView(task, currentView));
   const short = (t) => (t.length > 26 ? t.slice(0, 25) + '…' : t);
   const items = [];
 
@@ -1894,6 +1958,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   bindListLongPress($('#taskList'));
+
+  // Быстрый переход ищет и по задачам, и по спискам, и показывает результат
+  // поверх экрана — на телефоне это удобнее, чем поле в выдвижной панели,
+  // которое само же результат и загораживает.
+  $('#btnHeaderSearch').addEventListener('click', openPalette);
 
   $('#btnMenu').addEventListener('click', () => $('#app').classList.toggle('sidebar-open'));
   $('#sidebarScrim').addEventListener('click', closeMobileSidebar);

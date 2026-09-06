@@ -84,7 +84,6 @@ html, body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  -webkit-app-region: drag;
 }
 
 .sidebar-top { padding: 14px 12px 8px; }
@@ -167,6 +166,12 @@ html, body {
   color: var(--text-primary);
   font-size: 13px;
   width: 100%;
+}
+/* На сенсорном экране клавиш ⌘K не существует — подпись превращается в
+   лупу, оставаясь той же кнопкой быстрого перехода. */
+@media (hover: none) {
+  .search-kbd { font-size: 0; }
+  .search-kbd::after { content: '⌕'; font-size: 15px; }
 }
 .search-kbd {
   font-size: 10px;
@@ -2168,4 +2173,26 @@ html { touch-action: manipulation; }
   }
   .theme-row-label { font-size: 13px; }
   .theme-opt { width: 38px; height: 32px; }
+}
+
+/* Кнопка поиска в шапке. Прижата к правому краю заголовка, размером с
+   гамбургер — две кнопки по краям читаются как пара. */
+.header-search-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.header-search-btn:hover { background: var(--row-hover); color: var(--text-primary); }
+.header-search-btn:active { background: var(--row-selected); }
+@media (max-width: 700px) {
+  .header-search-btn { width: 40px; height: 40px; }
 }

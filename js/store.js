@@ -287,9 +287,10 @@ class Store {
 
   // Последнее, что пользователь убрал с глаз: удалил или отметил выполненным.
   // Нужно для возврата случайно закрытой задачи из меню пустого места списка.
-  lastRemoved() {
+  lastRemoved(fits = () => true) {
     let trashed = null, completed = null;
     Object.values(this.state.tasks).forEach(t => {
+      if (!fits(t)) return;
       if (t.status === 'trashed' && t.trashedAt) {
         if (!trashed || t.trashedAt > trashed.trashedAt) trashed = t;
       } else if (t.status === 'completed' && t.completedAt) {
