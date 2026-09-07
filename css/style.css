@@ -6,16 +6,16 @@
   --text-secondary: #6e6e73;
   --text-tertiary: #9a9aa0;
   --border: #dfe1e6;
-  --accent: #4a7dfc;
-  --accent-today: #4a7dfc;
+  --accent: #5b4ce8;
+  --accent-today: #5b4ce8;
   --accent-upcoming: #d9822b;
   --accent-anytime: #3fae5a;
-  --accent-someday: #8a6fd4;
+  --accent-someday: #9b7ce0;
   --accent-logbook: #8a8a90;
-  --accent-inbox: #4a90d9;
+  --accent-inbox: #6b7cf0;
   --accent-trash: #9a9aa0;
   --row-hover: rgba(0,0,0,0.035);
-  --row-selected: rgba(74,125,252,0.12);
+  --row-selected: rgba(91,76,232,0.11);
   --checkbox-border: #c6c8cf;
   --shadow: 0 1px 3px rgba(0,0,0,0.08);
   --tag-bg: #e7e9ee;
@@ -33,7 +33,7 @@
     --text-tertiary: #6f7075;
     --border: #313235;
     --row-hover: rgba(255,255,255,0.04);
-    --row-selected: rgba(74,125,252,0.18);
+    --row-selected: rgba(91,76,232,0.20);
     --checkbox-border: #55565c;
     --shadow: 0 1px 4px rgba(0,0,0,0.4);
     --tag-bg: #2d2e32;
@@ -111,8 +111,8 @@ html, body {
   position: relative;
   margin: 4px 12px 10px;
   padding: 8px 26px 8px 10px;
-  background: rgba(74,125,252,0.1);
-  border: 1px solid rgba(74,125,252,0.25);
+  background: rgba(91,76,232,0.10);
+  border: 1px solid rgba(91,76,232,0.25);
   border-radius: 8px;
   font-size: 12px;
   color: var(--text-primary);
@@ -425,7 +425,7 @@ html, body {
   background: var(--accent);
   color: white;
   border: none;
-  box-shadow: 0 4px 14px rgba(74,125,252,0.45);
+  box-shadow: 0 4px 14px rgba(91,76,232,0.42);
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
 }
@@ -1186,10 +1186,10 @@ body.picker-open { overflow: hidden; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.parse-chip.when { background: rgba(74,125,252,0.14); color: var(--accent); }
+.parse-chip.when { background: rgba(91,76,232,0.13); color: var(--accent); }
 .parse-chip.time { background: rgba(217,130,43,0.16); color: #b96a1d; }
 .parse-chip.tag  { background: rgba(138,111,212,0.16); color: #7256bd; }
-.parse-chip.p1 { background: rgba(74,125,252,0.14); color: var(--accent); }
+.parse-chip.p1 { background: rgba(91,76,232,0.13); color: var(--accent); }
 .parse-chip.p2 { background: rgba(217,130,43,0.16); color: #b96a1d; }
 .parse-chip.p3 { background: rgba(224,71,62,0.14); color: var(--danger); }
 
@@ -1522,9 +1522,11 @@ body.picker-open { overflow: hidden; }
   --glass-shadow: 0 12px 40px rgba(20, 28, 54, 0.14);
   --glass-scrim: rgba(20, 24, 40, 0.18);
   /* пятна на подложке: без них размывать нечего и стекло выглядит серой заливкой */
-  --tint-a: rgba(74, 125, 252, 0.16);
-  --tint-b: rgba(217, 130, 43, 0.10);
-  --tint-c: rgba(138, 111, 212, 0.10);
+  /* Тёплое пятно слева и холодное справа — от него всё оформление и читается
+     как «рассвет», а стеклу есть что размывать. */
+  --tint-a: rgba(255, 178, 143, 0.34);
+  --tint-b: rgba(124, 108, 245, 0.26);
+  --tint-c: rgba(170, 150, 255, 0.18);
 }
 
 @media (prefers-color-scheme: dark) {:root:not([data-theme="light"]) {
@@ -1534,18 +1536,21 @@ body.picker-open { overflow: hidden; }
     --glass-edge: rgba(255, 255, 255, 0.14);
     --glass-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
     --glass-scrim: rgba(0, 0, 0, 0.42);
-    --tint-a: rgba(74, 125, 252, 0.22);
-    --tint-b: rgba(217, 130, 43, 0.12);
-    --tint-c: rgba(138, 111, 212, 0.14);
+    /* в темноте тёплое пятно приглушаем: на чёрном оно быстро становится грязным */
+    --tint-a: rgba(255, 150, 120, 0.14);
+    --tint-b: rgba(124, 108, 245, 0.26);
+    --tint-c: rgba(150, 128, 255, 0.18);
   }
 }
 
 /* ---- подложка ---- */
 body {
   background:
-    radial-gradient(1100px 720px at 6% -14%, var(--tint-a), transparent 62%),
-    radial-gradient(900px 620px at 106% 2%, var(--tint-b), transparent 58%),
-    radial-gradient(760px 620px at 50% 116%, var(--tint-c), transparent 60%),
+    /* Центры пятен держим у самых краёв, но не за ними: вынесенное далеко
+       наружу пятно на узком экране оставляет только блёклый хвост. */
+    radial-gradient(120vw 78vh at -8% 4%, var(--tint-a), transparent 66%),
+    radial-gradient(105vw 70vh at 108% -4%, var(--tint-b), transparent 62%),
+    radial-gradient(95vw 62vh at 62% 106%, var(--tint-c), transparent 64%),
     var(--bg-main);
   background-attachment: fixed;
 }
@@ -1634,10 +1639,10 @@ body {
 
 /* ---- кнопка добавления ---- */
 .fab {
-  background: linear-gradient(160deg, #6b98ff, var(--accent) 55%, #3a67e0);
+  background: linear-gradient(160deg, #7d6ff2, var(--accent) 55%, #4a3ad4);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.45),
-    0 8px 24px rgba(74, 125, 252, 0.42);
+    0 8px 24px rgba(91, 76, 232, 0.40);
   border: 1px solid rgba(255, 255, 255, 0.28);
 }
 
@@ -2062,7 +2067,7 @@ html { touch-action: manipulation; }
     --text-tertiary: #6f7075;
     --border: #313235;
     --row-hover: rgba(255,255,255,0.04);
-    --row-selected: rgba(74,125,252,0.18);
+    --row-selected: rgba(91,76,232,0.20);
     --checkbox-border: #55565c;
     --shadow: 0 1px 4px rgba(0,0,0,0.4);
     --tag-bg: #2d2e32;
@@ -2081,9 +2086,10 @@ html { touch-action: manipulation; }
     --glass-edge: rgba(255, 255, 255, 0.14);
     --glass-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
     --glass-scrim: rgba(0, 0, 0, 0.42);
-    --tint-a: rgba(74, 125, 252, 0.22);
-    --tint-b: rgba(217, 130, 43, 0.12);
-    --tint-c: rgba(138, 111, 212, 0.14);
+    /* в темноте тёплое пятно приглушаем: на чёрном оно быстро становится грязным */
+    --tint-a: rgba(255, 150, 120, 0.14);
+    --tint-b: rgba(124, 108, 245, 0.26);
+    --tint-c: rgba(150, 128, 255, 0.18);
   }
 
 :root[data-theme="dark"] { --field-fill: rgba(255, 255, 255, 0.07); }
