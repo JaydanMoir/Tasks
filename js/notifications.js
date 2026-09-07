@@ -23,6 +23,12 @@ const SNOOZE_MINUTES = 10;
 // переживают пересборку расписания, которая отменяет всё остальное.
 const SNOOZE_ID_BASE = 2000000000;
 
+// Без этого поля iOS доставляет уведомление молча: плагин выставляет звук
+// только когда имя передано, иначе content.sound остаётся пустым. Своего файла
+// у нас нет, а несуществующее имя — задокументированный способ получить
+// системный звук по умолчанию.
+const SOUND = 'default';
+
 export function isNativeApp() {
   return Boolean(window.Capacitor?.isNativePlatform?.());
 }
@@ -111,6 +117,7 @@ function entriesForTask(task, today) {
       body: bodyFor(task, kind),
       // повторяющиеся отдаём календарным триггером: один слот вместо копии на каждый день
       schedule: daily ? { on: hm(time) } : { at: fireAt },
+      sound: SOUND,
       actionTypeId: ACTION_TYPE,
       extra: { taskId: task.id, kind },
       sortAt: fireAt.getTime(),
@@ -133,6 +140,7 @@ function entriesForTask(task, today) {
         title: task.title,
         body: bodyFor(task, 'main'),
         schedule: { at: fireAt },
+        sound: SOUND,
         actionTypeId: ACTION_TYPE,
         extra: { taskId: task.id, kind: 'repeat' },
         sortAt: fireAt.getTime(),
@@ -225,6 +233,7 @@ async function snooze(notification) {
       title: notification.title,
       body: notification.body,
       schedule: { at },
+      sound: SOUND,
       actionTypeId: ACTION_TYPE,
       extra: notification.extra,
     }],
