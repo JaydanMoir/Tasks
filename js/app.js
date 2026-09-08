@@ -1205,6 +1205,10 @@ function autoGrow(el) {
 // выбрасывает фокус при переходе между полями. Поэтому обновляем только сайдбар и список.
 function commitInlineEdit() {
   store.saveQuiet();
+  // saveQuiet не оповещает подписчиков — иначе перерисовка забирала бы фокус
+  // на каждой букве. Но на этом оповещении висит пересборка уведомлений, и без
+  // явного вызова в напоминании навсегда оставалось прежнее название задачи.
+  scheduleSyncSoon();
   renderSidebar();
   renderMain();
 }
@@ -1704,12 +1708,16 @@ function setupNativeNotifications() {
   if (!isNativeApp()) return;
   store.subscribe(scheduleSyncSoon);
   initNativeNotifications({
+    // Раньше нажатие открывало карточку задачи — экран настроек поверх всего,
+    // хотя от напоминания обычно нужно просто увидеть дело в списке и отметить
+    // его. Открываем список, где задача живёт, и подсвечиваем её саму.
     onOpenTask: (taskId) => {
       const t = store.state.tasks[taskId];
       if (!t) return;
       currentView = pickViewForTask(t);
-      selectedTaskId = taskId;
+      selectedTaskId = null;
       renderAll();
+      flashTask(taskId);
     },
     // «Выполнить» из уведомления: задача закрывается сразу, приложение лишь
     // догоняет состояние. Тоста не показываем — его всё равно никто не увидит.
@@ -2045,6 +2053,22 @@ function openListMenu(x, y) {
   if (!items.length) return false;
   showMenu(items, x, y);
   return true;
+}
+
+// Короткая подсветка строки: после перехода из уведомления в списке из десятка
+// задач иначе непонятно, о которой шла речь.
+let flashTimer = null;
+function flashTask(taskId) {
+  clearTimeout(flashTimer);
+  $$('.task-row.flash').forEach(el => el.classList.remove('flash'));
+  // ждём кадр: строки появляются в разметке только после renderAll выше
+  requestAnimationFrame(() => {
+    const row = document.querySelector(`.task-row[data-id="${taskId}"]`);
+    if (!row) return;
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    row.classList.add('flash');
+    flashTimer = setTimeout(() => row.classList.remove('flash'), 2600);
+  });
 }
 
 // ---------------- Смена суток ----------------

@@ -74,9 +74,25 @@ function shiftTime(time, deltaMin) {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
 }
 
+const dayLabel = (dateStr) => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+};
+
 function bodyFor(task, kind) {
-  if (kind === 'lead') return `Через ${formatLead(task.reminderLeadMinutes)} — в ${task.reminderTime}`;
+  // Просроченная задача напоминает о себе каждый день, пока её не закроют.
+  // Без этой приписки текст выглядел как дело сегодняшнего дня, и было
+  // непонятно, почему уведомление пришло в день, когда в календаре пусто.
+  const late = isDateStr(task.when) && task.when < todayStr()
+    ? `Просрочено с ${dayLabel(task.when)}`
+    : null;
+
+  if (kind === 'lead') {
+    const base = `Через ${formatLead(task.reminderLeadMinutes)} — в ${task.reminderTime}`;
+    return late ? `${late} · ${base}` : base;
+  }
   const notes = task.notes && task.notes.trim();
+  if (late) return notes ? `${late} · ${notes}` : `${late} · было на ${task.reminderTime}`;
   return notes || `Напоминание на ${task.reminderTime}`;
 }
 
