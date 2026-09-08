@@ -2294,3 +2294,14 @@ html { touch-action: manipulation; }
 }
 .cal-sheet-day.blocked:hover { background: none; }
 .cal-sheet-chip:disabled { opacity: 0.4; cursor: default; }
+
+/* Подсветка задачи, к которой перешли из уведомления. Затухает сама: постоянная
+   заливка спорила бы с выделением выбранной строки. */
+@keyframes task-flash {
+  0%, 55% { background: var(--row-selected); box-shadow: 0 0 0 2px var(--accent) inset; }
+  100%    { background: transparent; box-shadow: none; }
+}
+.task-row.flash { animation: task-flash 2.6s ease-out; border-radius: 10px; }
+@media (prefers-reduced-motion: reduce) {
+  .task-row.flash { animation: none; background: var(--row-selected); }
+}
