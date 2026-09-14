@@ -7,6 +7,7 @@ import { bindDetailBackSwipe, bindSidebarSwipe, EDGE_ZONE } from './edgeswipe.js
 import { exportBackup } from './backup.js?v=15';
 import { tapLight, tapMedium, tapSuccess } from './haptics.js?v=15';
 import { askText, askConfirm } from './dialog.js?v=15';
+import { setBadge } from './badge.js?v=15';
 
 // ---------------- UI state (not persisted) ----------------
 let currentView = { type: 'today' };
@@ -411,10 +412,14 @@ function renderMain() {
     }
   } else if (currentView.type === 'anytime') {
     setHeader('anytime');
-    html = renderOrganizedList(store.anytimeTasks());
+    const tasks = store.anytimeTasks();
+    html = tasks.length ? renderOrganizedList(tasks)
+      : emptyMsg('Задач без даты нет', '≡');
   } else if (currentView.type === 'someday') {
     setHeader('someday');
-    html = renderOrganizedList(store.somedayTasks());
+    const tasks = store.somedayTasks();
+    html = tasks.length ? renderOrganizedList(tasks)
+      : emptyMsg('Отложенного ничего нет', '🌙');
   } else if (currentView.type === 'logbook') {
     setHeader('logbook');
     const tasks = store.logbookTasks();
@@ -714,6 +719,7 @@ function bindTaskListEvents() {
       if (wasActive) tapSuccess(); else tapLight();
     });
   });
+  bindTagPills(listEl);
   listEl.querySelectorAll('[data-tag-filter]').forEach(el => {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -795,7 +801,10 @@ function bindSwipe(row) {
 
     // Долгое нажатие открывает то же меню, что правый клик на настольном
     // экране: без него быстрые действия на телефоне были недоступны вовсе.
+    // Но на пилюле тега удержание принадлежит самому тегу — иначе всплывающее
+    // событие поднимает оба таймера и побеждает тот, что выше по дереву.
     cancelPress();
+    if (e.target.closest('.tag-pill')) return;
     pressTimer = setTimeout(() => {
       pressTimer = null;
       tracking = false;
@@ -1167,6 +1176,7 @@ function renderDetail() {
   panel.querySelectorAll('[data-tag-toggle]').forEach(el => {
     el.addEventListener('click', () => store.toggleTaskTag(task.id, el.dataset.tagToggle));
   });
+  bindTagPills(panel);
   $('#detTagNew').addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && e.target.value.trim()) {
       const tag = store.createTag(e.target.value.trim());
@@ -1305,6 +1315,59 @@ function initVoiceInput() {
     onError: (msg) => setVoiceStatus(msg, 'error'),
   });
   $('#btnQuickAddMic').hidden = false;
+}
+
+function startVoiceInput() {
+  initVoiceInput();
+  if (!voiceInput || voiceInput.isActive()) return;
+  voiceInput.start();
+}
+
+// Удержание кнопки добавления сразу открывает окно и включает диктовку.
+//
+// Распознавание речи в WebKit требует пользовательского жеста, а таймер
+// удержания срабатывает уже вне его. Поэтому пробуем дважды: по таймеру —
+// чтобы запись пошла, пока палец ещё на кнопке, и повторно на отпускании,
+// где жест заведомо действителен. Второй вызов ничего не делает, если первый
+// удался — start() проверяет, не идёт ли сеанс уже.
+function bindFabHoldToDictate(fab) {
+  let timer = null, armed = false, sx = 0, sy = 0;
+  const cancel = () => { clearTimeout(timer); timer = null; };
+
+  fab.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1 || !speechSupported()) return;
+    sx = e.touches[0].clientX;
+    sy = e.touches[0].clientY;
+    armed = false;
+    cancel();
+    timer = setTimeout(() => {
+      timer = null;
+      armed = true;
+      tapMedium();
+      openQuickAdd();
+      startVoiceInput();
+    }, 450);
+  }, { passive: true });
+
+  fab.addEventListener('touchmove', (e) => {
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - sx) > 8 || Math.abs(t.clientY - sy) > 8) cancel();
+  }, { passive: true });
+
+  fab.addEventListener('touchend', () => {
+    cancel();
+    if (armed) startVoiceInput();
+  });
+  fab.addEventListener('touchcancel', cancel);
+
+  // Обычный тап после удержания открыл бы окно заново, а вместе с ним
+  // сбросил бы диктовку: openQuickAdd глушит микрофон при открытии.
+  fab.addEventListener('click', (e) => {
+    if (!armed) return;
+    armed = false;
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
 }
 
 function stopVoiceInput() {
@@ -2000,6 +2063,93 @@ function taskFitsView(task, view) {
   }
 }
 
+// Удержание на пилюле тега — единственное место, откуда тегом можно управлять:
+// отдельного экрана со списком у них нет, а живут они и в строках задач,
+// и в наборе внутри карточки.
+function bindTagPills(root) {
+  root.querySelectorAll('.tag-pill[data-tag-toggle], .tag-pill[data-tag-filter]').forEach(el => {
+    const id = el.dataset.tagToggle || el.dataset.tagFilter;
+    let timer = null, sx = 0, sy = 0, fired = false;
+    const cancel = () => { clearTimeout(timer); timer = null; };
+
+    el.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY; fired = false;
+      cancel();
+      timer = setTimeout(() => {
+        timer = null; fired = true;
+        tapMedium();
+        openTagMenu(id, sx, sy);
+      }, 480);
+    }, { passive: true });
+    el.addEventListener('touchmove', (e) => {
+      const t = e.touches[0];
+      if (Math.abs(t.clientX - sx) > 6 || Math.abs(t.clientY - sy) > 6) cancel();
+    }, { passive: true });
+    el.addEventListener('touchend', cancel);
+    el.addEventListener('touchcancel', cancel);
+    // после удержания палец отпускается на пилюле — обычный тап не должен сработать
+    el.addEventListener('click', (e) => { if (fired) { e.preventDefault(); e.stopPropagation(); fired = false; } }, true);
+    el.addEventListener('contextmenu', (e) => { e.preventDefault(); openTagMenu(id, e.clientX, e.clientY); });
+  });
+}
+
+// Меню тега. Теги заводятся сами при разборе строки, поэтому нужен способ
+// исправить опечатку и убрать лишнее — иначе список тегов в каждой карточке
+// растёт бесконечно.
+function openTagMenu(tagId, x, y) {
+  const tag = store.state.tags[tagId];
+  if (!tag) return false;
+  const used = store.tagUsage(tagId);
+  const items = [
+    { icon: '#', label: `Показать задачи (${used})`, action: () => {
+      currentView = { type: 'tag', id: tagId };
+      selectedTaskId = null;
+      closeMobileSidebar();
+      renderAll();
+    } },
+    { sep: true },
+    { icon: '✎', label: 'Переименовать', action: async () => {
+      const title = await askText({ title: 'Переименовать тег', value: tag.title, confirmLabel: 'Сохранить' });
+      if (!title || title === tag.title) return;
+      const before = Object.keys(store.state.tags).length;
+      store.renameTag(tagId, title);
+      // при совпадении имён теги сливаются — об этом стоит сказать
+      if (Object.keys(store.state.tags).length < before) showToast(`Объединён с тегом #${title}`);
+      tapLight();
+    } },
+    { icon: '✕', label: 'Убрать неиспользуемые', action: async () => {
+      const unused = store.unusedTags();
+      if (!unused.length) { showToast('Неиспользуемых тегов нет'); return; }
+      const names = unused.map(t => '#' + t.title).join(', ');
+      const ok = await askConfirm({
+        title: `Убрать ${unused.length} ${unused.length === 1 ? 'тег' : 'тега(ов)'}?`,
+        message: `Ни на одной задаче не стоят: ${names}`,
+        confirmLabel: 'Убрать',
+      });
+      if (!ok) return;
+      unused.forEach(t => store.deleteTag(t.id));
+      tapLight();
+      showToast('Неиспользуемые теги убраны');
+    } },
+    { icon: '🗑', label: 'Удалить тег', danger: true, action: async () => {
+      const ok = await askConfirm({
+        title: `Удалить тег #${tag.title}?`,
+        message: used ? `Он снимется с задач (${used}), сами задачи останутся.` : 'Тег ни на чём не стоит.',
+        confirmLabel: 'Удалить',
+        danger: true,
+      });
+      if (!ok) return;
+      store.deleteTag(tagId);
+      if (currentView.type === 'tag' && currentView.id === tagId) currentView = { type: 'today' };
+      tapMedium();
+      renderAll();
+    } },
+  ];
+  showMenu(items, x, y);
+  return true;
+}
+
 // Меню по удержанию на пустом месте списка. Отдельная кнопка «отменить» жила
 // только в тосте и пропадала через несколько секунд — вернуть случайно закрытую
 // задачу после этого было нечем, кроме похода в корзину или журнал.
@@ -2100,6 +2250,10 @@ function renderAll() {
   renderSidebar();
   renderMain();
   renderDetail();
+  // На иконке — то, что требует внимания сегодня: сегодняшние дела вместе
+  // с просроченными. Складывать сюда весь список смысла нет, значок должен
+  // отвечать на вопрос «есть ли что-то прямо сейчас».
+  setBadge(store.todayTasks().length + store.overdueTasks().length);
 }
 
 store.subscribe(renderAll);
@@ -2180,6 +2334,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindKeyboardInset();
   $('#btnQuickAdd').addEventListener('click', openQuickAdd);
   $('#btnFab').addEventListener('click', openQuickAdd);
+  bindFabHoldToDictate($('#btnFab'));
   $('#quickAddSubmit').addEventListener('click', submitQuickAdd);
   $('#quickAddTitle').addEventListener('input', renderQuickAddParse);
   $('#btnQuickAddMic').addEventListener('click', () => {

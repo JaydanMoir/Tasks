@@ -553,7 +553,55 @@ class Store {
   }
 
   // ---------------- Tags ----------------
-  createTag(title, color = '#4a7dfc') {
+  renameTag(id, title) {
+    const t = this.state.tags[id];
+    const name = String(title || '').trim();
+    if (!t || !name) return null;
+    // Слияние вместо второго тега с тем же именем: иначе переименование
+    // порождало бы дубликат, ради устранения которого всё и затевалось.
+    const clash = Object.values(this.state.tags)
+      .find(x => x.id !== id && x.title.toLowerCase() === name.toLowerCase());
+    if (clash) { this.mergeTags(id, clash.id); return clash; }
+    t.title = name;
+    this.save();
+    return t;
+  }
+
+  // Переносит задачи с одного тега на другой и убирает исходный
+  mergeTags(fromId, toId) {
+    Object.values(this.state.tasks).forEach(t => {
+      if (!t.tags.includes(fromId)) return;
+      t.tags = t.tags.filter(x => x !== fromId);
+      if (!t.tags.includes(toId)) t.tags.push(toId);
+    });
+    delete this.state.tags[fromId];
+    this.save();
+  }
+
+  deleteTag(id) {
+    if (!this.state.tags[id]) return 0;
+    let used = 0;
+    Object.values(this.state.tasks).forEach(t => {
+      if (!t.tags.includes(id)) return;
+      t.tags = t.tags.filter(x => x !== id);
+      used++;
+    });
+    delete this.state.tags[id];
+    this.save();
+    return used;
+  }
+
+  tagUsage(id) {
+    return Object.values(this.state.tasks).filter(t => t.status !== 'trashed' && t.tags.includes(id)).length;
+  }
+
+  // Теги заводятся сами, стоит написать «#дом» в строке добавления, и никуда
+  // потом не деваются. Опечатка остаётся навсегда и висит в списке у каждой задачи.
+  unusedTags() {
+    return Object.values(this.state.tags).filter(t => this.tagUsage(t.id) === 0);
+  }
+
+  createTag(title, color = '#5b4ce8') {
     const existing = Object.values(this.state.tags).find(t => t.title.toLowerCase() === title.toLowerCase());
     if (existing) return existing;
     const id = uid();
