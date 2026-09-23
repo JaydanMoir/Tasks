@@ -47,3 +47,24 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
 }
+
+
+// iOS 27 не запускает приложения, не перешедшие на модель сцен. Одного
+// объявления сцены в Info.plist оказалось мало: UIKit создавал сцену, но окна
+// не строил — приложение жило с чёрным экраном без корневого контроллера.
+// Поэтому строим окно сами, а контроллер берём из той же раскадровки, чтобы
+// не расходиться с тем, что настроено в ней.
+class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+    var window: UIWindow?
+
+    func scene(_ scene: UIScene,
+               willConnectTo session: UISceneSession,
+               options connectionOptions: UIScene.ConnectionOptions) {
+        guard let windowScene = scene as? UIWindowScene else { return }
+        let window = UIWindow(windowScene: windowScene)
+        window.rootViewController = UIStoryboard(name: "Main", bundle: nil)
+            .instantiateInitialViewController()
+        self.window = window
+        window.makeKeyAndVisible()
+    }
+}
